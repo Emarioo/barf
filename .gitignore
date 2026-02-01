@@ -1,0 +1,15 @@
+int
+releases
+
+.vscode
+
+
+*.o
+*.ba
+*.exe
+*.lib
+*.dll
+*.so
+*.a
+*.ilk
+*.exp
