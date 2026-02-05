@@ -17,15 +17,16 @@ def compile():
     os.makedirs(RELEASES, exist_ok=True)
     os.makedirs(PACKAGE, exist_ok=True)
 
-    FLAGS = f"-g -Wall -I{ROOT}/src -I{ROOT}/include"
-    FILES = f"{ROOT}/src/barf/main.c {ROOT}/src/barf/format.c {ROOT}/src/barf/barf.c"
+    FLAGS = f"-g -I{ROOT}/src -I{ROOT}/include"
+    WARN = "-Wall -Wno-unused-variable"
+    FILES = f"{ROOT}/src/barf/main.c {ROOT}/src/barf/format.c {ROOT}/src/barf/barf.c {ROOT}/src/platform/platform.c"
     EXE   = f"{PACKAGE}/barf{'.exe' if platform.system()=="Windows" else ''}"
-    cmd(f"gcc {FLAGS} {FILES} -o {EXE}")
+    cmd(f"gcc {FLAGS} {WARN} {FILES} -o {EXE}")
 
-    os.system("gcc -c -mavx2 examples/wa.c -o wa.o")
+    os.system("gcc -c -I include -fno-builtin -static -nostdlib -ffreestanding -nostartfiles -mavx2 examples/wa.c -o wa.o")
 
     os.system(f"{EXE} -c wa.ba wa.o")
-    os.system(f"{EXE} wa.ba")
+    # os.system(f"{EXE} wa.ba")
 
 def cmd(c: str, silent: bool = False):
     c = c.replace("\\", "/")

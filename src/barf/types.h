@@ -35,6 +35,4 @@ typedef int8_t i8;
     #define FLU "%lu"
 #endif
 
-static int* _null_value;
-
-#define ASSERT(E) ( (E) ? 0 : (fprintf(stderr, "[ASSERT] %s:%d %s\n", __FUNCTION__, __LINE__, #E), *_null_value) )
+#define ASSERT(E) ( (E) ? 0 : (fprintf(stderr, "[ASSERT] %s:%d %s\n", __FUNCTION__, __LINE__, #E), *((int*)0) = 5) )

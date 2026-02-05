@@ -14,6 +14,8 @@ int main(int argc, char** argv) {
     bool print_version = false;
     bool combine = false;
 
+    int user_arg_index = 0;
+
     const char** extra_files = malloc(50 * sizeof(char*));
     int extra_files_len = 0;
 
@@ -32,6 +34,9 @@ int main(int argc, char** argv) {
             dump = true;
         } else if (!strcmp(arg, "-c") || !strcmp(arg, "--combine")) {
             combine = true;
+        } else if (!strcmp(arg, "--")) {
+            user_arg_index = argi;
+            break;
         } else {
             if (input_file) {
                 if (combine) {
@@ -46,9 +51,9 @@ int main(int argc, char** argv) {
     }
     if (print_help) {
         printf("Usage:\n");
-        printf("  barf -v                         Version\n");
-        printf("  barf file.barf               Load and run file\n");
-        printf("  barf file.barf -- [args...]  Load and run file with arguments\n");
+        printf("  barf -v                      Version\n");
+        printf("  barf file.ba                 Load and run file\n");
+        printf("  barf file.ba -- [args...]    Load and run file with arguments\n");
         printf("  barf -d file.barf            Dump BARF information\n");
         printf("  barf -tb file.barf <ofiles...>  Convert ELF to BARF\n");
         printf("  barf -te file.o <bfiles...>  Convert BARF to ELF\n");

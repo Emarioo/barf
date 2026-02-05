@@ -153,6 +153,20 @@ void barf_dump(BarfObject* object) {
         log("   size:   "FLU"\n", section->data_size);
         log("   reloc_offset: "FLU"\n", section->relocation_offset);
         log("   reloc_count:  %u\n", section->relocation_count);
+
+        for (u32 ri=0; ri < section->relocation_count; ri++) {
+            BarfRelocation* relocation = &object->relocations[i][ri];
+            BarfSymbol* symbol = &object->symbols[relocation->symbol_index];
+            const char* name = object->strings + symbol->string_offset;
+            if (symbol->type == BARF_SYMBOL_LOCAL) {
+                log("     0x%x %s (local symbol)\n", relocation->offset, name);
+            } else if (symbol->type == BARF_SYMBOL_GLOBAL) {
+                BarfSection* sym_section = &object->sections[symbol->section_index];
+                log("     0x%x %s (in %s)\n", relocation->offset, name, sym_section->name);
+            } else {
+                log("     0x%x %s (external symbol)\n", relocation->offset, name);
+            }
+        }
     }
     for (u32 i=0;i<object->header.symbol_count;i++) {
         BarfSymbol* symbol = &object->symbols[i];
@@ -279,7 +293,8 @@ bool barf_convert_from_coff(u8* data, u64 size, BarfObject* object, const char* 
     for (int i=0;i<header->NumberOfSymbols;i++) {
         Symbol_Record* symbol = (Symbol_Record*)(data + header->PointerToSymbolTable + i * Symbol_Record_SIZE);
         BarfSymbol*    sym = &object->symbols[object->header.symbol_count];
-        Symbol_Record* next_symbol = (Symbol_Record*)(data + header->PointerToSymbolTable + (i+1) * Symbol_Record_SIZE);
+
+        symbol_infos[i].symbol_index = -1;
 
         if (symbol->SectionNumber < 0) {
              if (symbol->NumberOfAuxSymbols) {
@@ -287,8 +302,6 @@ bool barf_convert_from_coff(u8* data, u64 size, BarfObject* object, const char* 
             }
             continue;
         }
-
-        symbol_infos[i].symbol_index = -1;
 
         char _name[12];
         memcpy(_name, symbol->Name.ShortName, 8);
@@ -327,30 +340,39 @@ bool barf_convert_from_coff(u8* data, u64 size, BarfObject* object, const char* 
 
     object->header.string_size = next_string_offset;
     
-    for (int i = 0; i < header->NumberOfSections; i++) {
-        Section_Header* section = (Section_Header*)(data + offset_of_sections + i * Section_Header_SIZE);
-        SectionInfo* section_info = &section_infos[i];
+    for (int si = 0; si < header->NumberOfSections; si++) {
+        Section_Header* section = (Section_Header*)(data + offset_of_sections + si * Section_Header_SIZE);
+        SectionInfo* section_info = &section_infos[si];
 
         if (section_info->section_index == -1) {
             continue;
         }
         BarfSection* sec = &object->sections[section_info->section_index];
 
-        object->relocations[i] = malloc(section->NumberOfRelocations * sizeof(*object->relocations[i]));
-        memset(object->relocations[i], 0, section->NumberOfRelocations * sizeof(*object->relocations[i]));
-        BarfRelocation* relocations = object->relocations[i];
+        if (!section->NumberOfRelocations) {
+            continue;
+        }
+        BarfRelocation* relocations = malloc(section->NumberOfRelocations * sizeof(BarfRelocation));
+        object->relocations[si] = relocations;
+        memset(relocations, 0, section->NumberOfRelocations * sizeof(BarfRelocation));
         sec->relocation_offset = section->PointerToRelocations;
 
-        for (int i=0;i<section->NumberOfRelocations;i++) {
-            COFF_Relocation* relocation = (COFF_Relocation*)(data + section->PointerToRelocations + i * COFF_Relocation_SIZE);
+        for (int ri=0;ri<section->NumberOfRelocations;ri++) {
+            COFF_Relocation* relocation = (COFF_Relocation*)(data + section->PointerToRelocations + ri * COFF_Relocation_SIZE);
             BarfRelocation* rel = &relocations[sec->relocation_count];
+
+            u32 symbol_index = symbol_infos[relocation->SymbolTableIndex].symbol_index;
+
+            BarfSymbol* symbol = &object->symbols[symbol_index];
+            const char* name = object->strings + symbol->string_offset;
 
             if (relocation->Type == IMAGE_REL_AMD64_REL32) {
                 rel->type = BARF_RELOC_REL32;
             } else {
-                printf("barf: Unhandled coff reloc type %d, sym index %u\n", relocation->Type, symbol_infos[relocation->SymbolTableIndex].symbol_index);
+                printf("barf: Unhandled coff reloc type %d, sym index %u\n", relocation->Type, symbol_index);
             }
-            rel->symbol_index = symbol_infos[relocation->SymbolTableIndex-1].symbol_index;
+            rel->symbol_index = symbol_index;
+            rel->offset = relocation->VirtualAddress;
 
             sec->relocation_count++;
         }
@@ -392,7 +414,7 @@ bool barf_convert_from_coff(u8* data, u64 size, BarfObject* object, const char* 
         new_offset = next_section_data_offset;
 
         fseek(file, next_section_data_offset, SEEK_SET);
-        fwrite(data + section->relocation_offset, sizeof(BarfRelocation), section->relocation_count, file);
+        fwrite(object->relocations[i], sizeof(BarfRelocation), section->relocation_count, file);
         
         section->relocation_offset = new_offset;
 
