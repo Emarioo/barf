@@ -137,7 +137,10 @@ void parse_input(const char* input, int size, int* argc, char*** argv) {
     int start_head = 0;
     int head = 0;
     while (head < size) {
-        if (input[head] == ' ') {
+        if (input[head] == ' ' || head+1 == size) {
+            if (head+1 == size) {
+                head++;
+            }
             int len = head - start_head;
             if (len > 0) {
                 args[argi] = text + text_len;
@@ -165,7 +168,9 @@ int entry(const char* path, const char* data, int size) {
     char** argv;
     parse_input(data, size, &argc, &argv);
 
-
+    for (int i=0;i<argc;i++) {
+        log__printf("%d %s\n", i, argv[i]);
+    }
 
     FSHandle file = fs__open("README.md", FS_READ);
 
@@ -190,6 +195,6 @@ int entry(const char* path, const char* data, int size) {
 }
 
 
-// void main() {
-//     entry("temp", 0, 0);
+// void main(int argc, char** argv) {
+//     entry("temp", argv[0], 1);
 // }

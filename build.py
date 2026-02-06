@@ -25,7 +25,7 @@ def compile():
 
     os.system("gcc -c -I include -fno-builtin -static -nostdlib -ffreestanding -nostartfiles -mavx2 examples/wa.c -o wa.o")
 
-    os.system(f"{EXE} -c wa.ba wa.o")
+    os.system(f"{EXE} -c wa.ba wa.o -- ok")
     # os.system(f"{EXE} wa.ba")
 
 def cmd(c: str, silent: bool = False):

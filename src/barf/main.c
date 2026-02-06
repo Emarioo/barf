@@ -8,16 +8,17 @@
 #define BARF_VERSION "0.0.1-dev"
 
 int main(int argc, char** argv) {
-    const char* input_file = NULL;
     bool dump = false;
     bool print_help = false;
     bool print_version = false;
     bool combine = false;
 
-    int user_arg_index = 0;
+    const char* output_file = NULL;
 
-    const char** extra_files = malloc(50 * sizeof(char*));
-    int extra_files_len = 0;
+    int user_arg_index = -1;
+
+    const char** input_files = malloc(50 * sizeof(char*));
+    int input_files_len = 0;
 
     int argi = 1;
     while (argi < argc) {
@@ -37,26 +38,31 @@ int main(int argc, char** argv) {
         } else if (!strcmp(arg, "--")) {
             user_arg_index = argi;
             break;
-        } else {
-            if (input_file) {
-                if (combine) {
-                    extra_files[extra_files_len++] = arg;
-                    continue;
-                }
-                fprintf(stderr, "ERROR barf: Input file already provided, remove '%s'\n", arg);
+        } else if (!strcmp(arg, "-o")) {
+            if (argi >= argc) {
+                fprintf(stderr, "ERROR barf: Expected file after '%s'\n", arg);
                 return 1;
             }
-            input_file = arg;
+            if (output_file) {
+                fprintf(stderr, "ERROR barf: Only one output file allowed. (extra file was '%s')\n", arg);
+                return 1;
+            }
+            output_file = argv[argi];
+            argi++;
+        } else {
+            // @TODO realloc
+            ASSERT(input_files_len < 50);
+            input_files[input_files_len++] = arg;
         }
     }
     if (print_help) {
         printf("Usage:\n");
-        printf("  barf -v                      Version\n");
-        printf("  barf file.ba                 Load and run file\n");
-        printf("  barf file.ba -- [args...]    Load and run file with arguments\n");
-        printf("  barf -d file.barf            Dump BARF information\n");
-        printf("  barf -tb file.barf <ofiles...>  Convert ELF to BARF\n");
-        printf("  barf -te file.o <bfiles...>  Convert BARF to ELF\n");
+        printf("  barf -v                         Version\n");
+        printf("  barf file.ba                    Load and run file\n");
+        printf("  barf file.ba -- [args...]       Load and run file with arguments\n");
+        printf("  barf -d file.ba                 Dump BARF information\n");
+        printf("  barf -c -o file.ba <ofiles...>  Convert/combine COFF/ELF/BA to BA\n");
+        printf("  barf -c -o file.o <bfiles...>   Convert BARF to ELF\n");
         return 0;
     }
 
@@ -67,7 +73,7 @@ int main(int argc, char** argv) {
     }
 
     if (dump) {
-        BarfObject* object = barf_parse_header_from_file(input_file);
+        BarfObject* object = barf_parse_header_from_file(input_files[0]);
         if (!object)
             return 1;
 
@@ -78,16 +84,20 @@ int main(int argc, char** argv) {
     }
 
     if (combine) {
-        // @TODO For loop all extra files and turn them to BARF objects
-        //     Combine objects into one.
-        bool res = barf_convert_from_elf_file(extra_files[0], input_file);
+        bool res = barf_combine_to_artifact(input_files_len, input_files, output_file);
         if (!res) {
             return 1;
         }
         // return 0;
     }
-
-    bool res = barf_load_file(input_file);
+    bool res;
+    if (user_arg_index != -1) {
+        // @TODO Do we load and relocate all input files that were passed in or
+        //   do user have to merge them into one first?
+        res = barf_load_file(input_files[0], argc - user_arg_index, (const char**)argv + user_arg_index);
+    } else {
+        res = barf_load_file(input_files[0], 0, NULL);
+    }
     if (!res)
         return 1;
 

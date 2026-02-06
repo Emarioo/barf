@@ -192,7 +192,7 @@ void create_platform(BarfLoader* loader) {
 
 
 
-bool barf_load_file(const char* path) {
+bool barf_load_file(const char* path, int argc, const char** argv) {
     BarfLoader* loader = NULL;
     BarfObject* object = NULL;
 
@@ -267,7 +267,23 @@ bool barf_load_file(const char* path) {
 
     // @TODO Setup segfault handler
 
-    int result = entry(path, NULL, 0);
+    char* arg_data = NULL;
+    int arg_data_len = 0;
+    if (argc > 0) {
+        int arg_data_cap = argc * 50;
+        arg_data = malloc(arg_data_cap);
+        for (int i = 0; i < argc;i++) {
+            int len = strlen(argv[i]);
+            if (arg_data_len != 0) {
+                arg_data[arg_data_len] = ' ';
+                arg_data_len++;
+            }
+            memcpy(arg_data + arg_data_len, argv[i], len);
+            arg_data_len += len;
+        }
+    }
+
+    int result = entry(path, arg_data, arg_data_len);
     printf("Exit code: %d", result);
 
     // alloc memory

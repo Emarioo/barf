@@ -51,7 +51,7 @@ void barf_dump(BarfObject* object);
 
 void barf_free_object(BarfObject* object);
 
-bool barf_convert_from_elf_file(const char* path, const char* output);
+bool barf_combine_to_artifact(int input_count, const char** input_files, const char* output);
 
 
-bool barf_load_file(const char* path);
+bool barf_load_file(const char* path, int argc, const char** argv);
