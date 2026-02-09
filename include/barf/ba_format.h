@@ -7,7 +7,7 @@
 // ################################
 
 
-#define BARF_MAGIC 0x46524142u // BARF
+#define BARF_MAGIC 0x46524142u // "BARF"
 
 
 
@@ -28,6 +28,7 @@ typedef struct BarfHeader {
     u32              section_count;
     u32              symbol_count;
     u32              string_size;
+    u32              _reserved2;
     u64              section_offset;
     u64              symbol_offset;
     u64              string_offset;
@@ -72,7 +73,6 @@ typedef struct BarfSymbol {
     u32             section_index;
     u32             offset; // offset into section where object symbol refers to is located
 } BarfSymbol;
-
 
 
 typedef enum {

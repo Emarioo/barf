@@ -120,6 +120,9 @@ static float second[64] = {0.7};
 
 int uninit;
 
+extern int counter;
+int update(int value);
+
 void* memcpy(void* dst, const void* src, size_t size) {
     for(int i=0;i<size;i++)
         *((char*)dst + i) = *((char*)src + i);
@@ -164,22 +167,25 @@ int entry(const char* path, const char* data, int size) {
 
     log__printf("entry from %s\n", path);
 
-    int argc;
-    char** argv;
-    parse_input(data, size, &argc, &argv);
+    // int argc;
+    // char** argv;
+    // parse_input(data, size, &argc, &argv);
 
-    for (int i=0;i<argc;i++) {
-        log__printf("%d %s\n", i, argv[i]);
-    }
+    // for (int i=0;i<argc;i++) {
+    //     log__printf("%d %s\n", i, argv[i]);
+    // }
 
-    FSHandle file = fs__open("README.md", FS_READ);
+    // FSHandle file = fs__open("README.md", FS_READ);
 
-    char text[24];
-    text[23] = 0;
-    fs__read(file, 0, text, 23);
-    log__printf("%s\n", text);
+    // char text[24];
+    // text[23] = 0;
+    // fs__read(file, 0, text, 23);
+    // log__printf("%s\n", text);
 
-    fs__close(file);
+    // fs__close(file);
+
+    int val = update(9);
+    log__printf("vals %d %d\n", counter, val);
 
 
     // FILE* file = fopen("README.md", "rb");

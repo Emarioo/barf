@@ -88,7 +88,8 @@ int main(int argc, char** argv) {
         if (!res) {
             return 1;
         }
-        // return 0;
+        fprintf(stderr, "combined into %s\n", output_file);
+        return 0;
     }
     bool res;
     if (user_arg_index != -1) {

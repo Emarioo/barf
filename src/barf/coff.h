@@ -7,8 +7,11 @@
 // I will refer to this site as MSDOC
 
 typedef enum _Machine_Type {
-    MACHINE_ZERO=0,
-    IMAGE_FILE_MACHINE_AMD64=0x8664, // x64
+    MACHINE_ZERO = 0,
+    IMAGE_FILE_MACHINE_I386  = 0x14c,
+    IMAGE_FILE_MACHINE_AMD64 = 0x8664,
+    IMAGE_FILE_MACHINE_ARM   = 0x1c0,
+    IMAGE_FILE_MACHINE_ARM64 = 0xaa64,
 } _Machine_Type;
 typedef u16 Machine_Type;
 

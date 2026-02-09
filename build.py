@@ -23,9 +23,15 @@ def compile():
     EXE   = f"{PACKAGE}/barf{'.exe' if platform.system()=="Windows" else ''}"
     cmd(f"gcc {FLAGS} {WARN} {FILES} -o {EXE}")
 
-    os.system("gcc -c -I include -fno-builtin -static -nostdlib -ffreestanding -nostartfiles -mavx2 examples/wa.c -o wa.o")
+    CFLAGS = "-I include -fno-builtin -static -fPIC -fpie -nostdlib -ffreestanding -nostartfiles -mavx2"
 
-    os.system(f"{EXE} -c wa.ba wa.o -- ok")
+    os.system(f"gcc -c {CFLAGS} examples/wa.c -o wa.o")
+    os.system(f"gcc -c {CFLAGS} examples/util.c -o util.o")
+
+    os.system(f"{EXE} -c -o pro.ba wa.o util.o")
+    # os.system(f"{EXE} -d pro.ba")
+    os.system(f"{EXE} pro.ba")
+    # os.system(f"{EXE} -c wa.ba wa.o -- ok")
     # os.system(f"{EXE} wa.ba")
 
 def cmd(c: str, silent: bool = False):

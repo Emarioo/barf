@@ -31,10 +31,11 @@ typedef struct {
 
 typedef struct BarfObject {
     BarfHeader       header;
-    BarfSection*     sections;    // find section count in header
-    BarfSymbol*      symbols;     // find symbol count in header
-    BarfRelocation** relocations; // find relocation count in sections
+    BarfSection*     sections;    // find counts in the header
+    BarfSymbol*      symbols;
+    BarfRelocation** relocations;
     char*            strings;
+    char**           section_data;
 
     // used at runtime
     BarfSegment* segments;
@@ -50,6 +51,11 @@ BarfObject* barf_parse_header_from_file(const char* path);
 void barf_dump(BarfObject* object);
 
 void barf_free_object(BarfObject* object);
+
+// Returns false if it wasn't coff
+bool barf_convert_from_coff(const char* path, const char* output);
+// Returns false if it wasn't elf
+bool barf_convert_from_elf(const char* path, const char* output);
 
 bool barf_combine_to_artifact(int input_count, const char** input_files, const char* output);
 
