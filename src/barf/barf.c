@@ -68,12 +68,9 @@ void* barf_get_address(BarfLoader* loader, const char* name) {
     for (int i=0;i<object->header.symbol_count;i++) {
         BarfSymbol* symbol = &object->symbols[i];
         const char* symbol_name = object->strings + symbol->string_offset;
-        if (symbol->section_index == -1) {
-            ASSERT(symbol->type == BARF_SYMBOL_EXTERNAL);
-            // @TODO This check should not be necessary because all symbols should be resolved.
-            //   Loader will give an error.
+        if (symbol->type != BARF_SYMBOL_GLOBAL)
             continue;
-        }
+
         if (!strcmp(name, symbol_name)) {
             // BarfSection* section = &object->sections[symbol->section_index];
             BarfSegment* segment = &object->segments[symbol->section_index];
@@ -190,6 +187,28 @@ void create_platform(BarfLoader* loader) {
     flag_memory(ptr, size, BARF_FLAG_EXEC);
 }
 
+bool barf_init_refptr(BarfLoader* loader) {
+    // @TODO Go through all objects
+    BarfObject* object = &loader->objects[0];
+    for (int si=0;si<object->header.symbol_count;si++) {
+        BarfSymbol*  symbol = &object->symbols[si];
+        const char* name = object->strings + symbol->string_offset;
+        if (strncmp(name, ".refptr.", 8)) {
+            continue;
+        }
+        const char* target_name = name + 8;
+
+        BarfSegment* segment = &object->segments[symbol->section_index];
+        
+        void* symbol_address = barf_get_address(loader, target_name);
+        if (!symbol_address) {
+            fprintf(stderr, "barf: Could not find %s referred to by %s\n", target_name, name);
+            return false;
+        }
+        *(void**)(segment->address + symbol->offset) = symbol_address;
+    }
+    return true;
+}
 
 
 bool barf_load_file(const char* path, int argc, const char** argv) {
@@ -241,6 +260,11 @@ bool barf_load_file(const char* path, int argc, const char** argv) {
 
     // Apply relocations
     bool res = barf_apply_relocations(loader);
+    if (!res) {
+        goto cleanup;
+    }
+
+    res = barf_init_refptr(loader);
     if (!res) {
         goto cleanup;
     }

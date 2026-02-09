@@ -163,8 +163,12 @@ void barf_dump(BarfObject* object) {
             if (symbol->type == BARF_SYMBOL_LOCAL) {
                 log("     0x%x %s (local symbol)\n", relocation->offset, name);
             } else if (symbol->type == BARF_SYMBOL_GLOBAL) {
-                BarfSection* sym_section = &object->sections[symbol->section_index];
-                log("     0x%x %s (in %s)\n", relocation->offset, name, sym_section->name);
+                if (symbol->section_index >= 0 && symbol->section_index < object->header.section_count) {
+                    BarfSection* sym_section = &object->sections[symbol->section_index];
+                    log("     0x%x %s (in %s)\n", relocation->offset, name, sym_section->name);
+                } else {
+                    log("     0x%x %s (in section index %d, bad index)\n", relocation->offset, name, symbol->section_index);
+                }
             } else {
                 log("     0x%x %s (external symbol)\n", relocation->offset, name);
             }
@@ -695,13 +699,6 @@ bool barf_combine_to_artifact(int input_count, const char** input_files, const c
         for (int si = 0; si < object->header.symbol_count; si++) {
             BarfSymbol* symbol = &object->symbols[si];
             const char* name = object->strings + symbol->string_offset;
-            
-            bool is_fake_global = false;
-            // Extra relocation abstraction on Windows with COFF?
-            if (!strncmp(name, ".refptr.", 8)) {
-                name += 8;
-                is_fake_global = true;
-            }
 
             if (symbol->type == BARF_SYMBOL_LOCAL) {
                 // Local symbols never collide. The name is not relevant.
@@ -722,7 +719,7 @@ bool barf_combine_to_artifact(int input_count, const char** input_files, const c
                 // debug("local %s\n", merged->strings + merged_symbol->string_offset);
 
                 continue;
-            } else if (symbol->type == BARF_SYMBOL_EXTERNAL || is_fake_global) {
+            } else if (symbol->type == BARF_SYMBOL_EXTERNAL) {
                 // Duplicate of external symbols can be removed.
                 // If there is a global symbol then external shall be removed in favour of the global.
 
@@ -759,7 +756,6 @@ bool barf_combine_to_artifact(int input_count, const char** input_files, const c
                 int len = strlen(name);
                 memcpy(merged->strings + merged_symbol->string_offset, name, len+1);
                 merged->header.string_size += len + 1;
-                // printf("add ext %s\n", merged->strings + merged_symbol->string_offset);
                 // debug("external %d %s\n", merged->header.symbol_count-1, merged->strings + merged_symbol->string_offset);
 
             } else if (symbol->type == BARF_SYMBOL_GLOBAL) {
@@ -782,6 +778,8 @@ bool barf_combine_to_artifact(int input_count, const char** input_files, const c
                     } else if (merged_symbol->type == BARF_SYMBOL_EXTERNAL) {
                         if (!strcmp(name, merge_name)) {
                             merged_symbol->type = BARF_SYMBOL_GLOBAL;
+                            merged_symbol->section_index = section_mapping[bi][symbol->section_index];
+                            merged_symbol->offset = symbol->offset;
                             symbol_mapping[bi][si] = i;
                             found = true;
                             break;
@@ -801,6 +799,8 @@ bool barf_combine_to_artifact(int input_count, const char** input_files, const c
                 merged_symbol->offset = symbol->offset;
                 merged_symbol->section_index = section_mapping[bi][symbol->section_index];
                 merged_symbol->string_offset = merged->header.string_size;
+
+                ASSERT(merged_symbol->section_index >= 0 && merged_symbol->section_index < merged->header.symbol_count);
 
                 int len = strlen(name);
                 memcpy(merged->strings + merged_symbol->string_offset, name, len+1);
