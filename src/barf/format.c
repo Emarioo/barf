@@ -1,77 +1,91 @@
 #include "barf/barf.h"
 
+#include "platform/platform.h"
+
 #include "barf/elf.h"
 #include "barf/coff.h"
 
-#define debug(...) fprintf(stderr, __VA_ARGS__)
+#define debug(...) log_error(__VA_ARGS__)
 // #define debug(...)
+
+#define log_error(...) log__printf(__VA_ARGS__)
+#define log_warning(...) log__printf(__VA_ARGS__)
+
+#define file_read(FILE, HEAD_PTR, PTR, SIZE) fs__read(FILE, ((*(HEAD_PTR) += (SIZE)), *(HEAD_PTR) - (SIZE)), PTR, SIZE)
+#define file_write(FILE, HEAD_PTR, PTR, SIZE) fs__write(FILE, ((*(HEAD_PTR) += (SIZE)), *(HEAD_PTR) - (SIZE)), PTR, SIZE)
+
+#define heap_alloc(SIZE) mem__alloc(SIZE, NULL)
+#define heap_free(PTR) mem__alloc(0, PTR)
+
+#define IS_INVALID_FS_HANDLE(F) ((F) == FS_INVALID_HANDLE)
 
 BarfObject* barf_parse_header_from_file(const char* path) {
     BarfObject* object = NULL;
-    FILE* file = NULL;
+    FSHandle file = FS_INVALID_HANDLE;
     
-    file = fopen(path, "rb");
-    if (!file) {
-        fprintf(stderr, "ERROR barf: '%s' not found\n", path);
+    file = fs__open(path, FS_READ);
+    if (IS_INVALID_FS_HANDLE(file)) {
+        log_error("ERROR barf: '%s' not found\n", path);
         goto cleanup;
     }
+    FSInfo info;
+    fs__info(file, &info);
+    size_t file_size = info.file_size;
 
-    fseek(file, 0, SEEK_END);
-    size_t file_size = ftell(file);
-    fseek(file, 0, SEEK_SET);
+    size_t fs_head = 0;
 
-    object = malloc(sizeof(*object));
+    object = mem__alloc(sizeof(*object), NULL);
     if (!object) {
-        fprintf(stderr, "ERROR barf: malloc failed, when parsing '%s'\n", path);
+        log_error("ERROR barf: heap_alloc failed, when parsing '%s'\n", path);
         goto cleanup;
     }
     memset(object, 0, sizeof(*object));
 
     if (file_size < sizeof(object->header)) {
-        fprintf(stderr, "ERROR barf: file to small for header, when parsing '%s'\n", path);
+        log_error("ERROR barf: file to small for header, when parsing '%s'\n", path);
         goto cleanup;
     }
 
-    fread(&object->header, 1, sizeof(object->header),  file);
+    file_read(file, &fs_head, &object->header, sizeof(object->header));
 
     if (object->header.magic != BARF_MAGIC) {
         union {
             u32 raw;
             char name[4];
         } magic = { BARF_MAGIC };
-        fprintf(stderr, "ERROR barf: magic incorrect %u == %.4s (should be %4.s)\n", object->header.magic, (char*)&object->header.magic, magic.name);
+        log_error("ERROR barf: magic incorrect %u == %.4s (should be %4.s)\n", object->header.magic, (char*)&object->header.magic, magic.name);
         goto cleanup;
     }
     
     u64 size_of_sections = object->header.section_count * sizeof(*object->sections);
 
     if (file_size < size_of_sections) {
-        fprintf(stderr, "ERROR barf: file to small for sections, when parsing '%s'\n", path);
+        log_error("ERROR barf: file to small for sections, when parsing '%s'\n", path);
         goto cleanup;
     }
 
-    object->sections = malloc(size_of_sections);
+    object->sections = mem__alloc(size_of_sections, NULL);
     if (!object->sections) {
-        fprintf(stderr, "ERROR barf: malloc failed, when parsing '%s'\n", path);
+        log_error("ERROR barf: heap_alloc failed, when parsing '%s'\n", path);
         goto cleanup;
     }
     memset(object->sections, 0, size_of_sections);
     
-    fread(object->sections, sizeof(*object->sections), object->header.section_count, file);
+    file_read(file, &fs_head, object->sections, sizeof(*object->sections) * object->header.section_count);
 
     
     u64 size_of_symbols = object->header.symbol_count * sizeof(*object->symbols);
-    object->symbols = malloc(size_of_symbols);
+    object->symbols = mem__alloc(size_of_symbols, NULL);
     memset(object->symbols, 0, size_of_symbols);
-    fread(object->symbols, sizeof(*object->symbols), object->header.symbol_count, file);
+    file_read(file, &fs_head, object->symbols, sizeof(*object->symbols) * object->header.symbol_count);
 
-    object->strings = malloc(object->header.string_size);
+    object->strings = mem__alloc(object->header.string_size, NULL);
     memset(object->strings, 0, object->header.string_size);
-    fread(object->strings, 1, object->header.string_size, file);
+    file_read(file, &fs_head, object->strings, object->header.string_size);
 
     u64 size_of_relocations_list = object->header.section_count * sizeof(*object->relocations);
     
-    object->relocations = malloc(size_of_relocations_list);
+    object->relocations = mem__alloc(size_of_relocations_list, NULL);
     memset(object->relocations, 0, size_of_relocations_list);
 
     for (int i=0;i<object->header.section_count;i++) {
@@ -82,27 +96,26 @@ BarfObject* barf_parse_header_from_file(const char* path) {
         }
 
         u64 size_of_relocations = section->relocation_count * sizeof(**object->relocations);
-        BarfRelocation* relocations = malloc(size_of_relocations);
+        BarfRelocation* relocations = mem__alloc(size_of_relocations, NULL);
         memset(relocations, 0, size_of_relocations);
 
-        fseek(file, section->relocation_offset, SEEK_SET);
-        fread(relocations, sizeof(**object->relocations), section->relocation_count, file);
+        fs__read(file, section->relocation_offset, relocations, sizeof(**object->relocations) * section->relocation_count);
 
         object->relocations[i] = relocations;
     }
 
 
-    fclose(file);
+    fs__close(file);
 
     return object;
 
 cleanup:
     if (file)
-        fclose(file);
+        fs__close(file);
     if (object) {
         if (object->sections)
-            free(object->sections);
-        free(object);
+            mem__alloc(0, object->sections);
+        mem__alloc(0, object);
     }
     return NULL;
 }
@@ -110,13 +123,13 @@ cleanup:
 
 
 void barf_free_object(BarfObject* object) {
-    free(object->sections);
-    free(object);
+    mem__alloc(0, object->sections);
+    mem__alloc(0, object);
 }
 
 
 void barf_dump(BarfObject* object) {
-    #define log(...) fprintf(stderr, __VA_ARGS__)
+    #define log(...)log__printf(__VA_ARGS__)
 
     log("BARF Format\n");
     log(" version: %u\n", object->header.version);
@@ -151,9 +164,9 @@ void barf_dump(BarfObject* object) {
         }
         log("\n");
         log("   align:  %hu\n", section->alignment);
-        log("   offset: "FLU"\n", section->data_offset);
-        log("   size:   "FLU"\n", section->data_size);
-        log("   reloc_offset: "FLU"\n", section->relocation_offset);
+        log("   offset: "FL"u\n", section->data_offset);
+        log("   size:   "FL"u\n", section->data_size);
+        log("   reloc_offset: "FL"u\n", section->relocation_offset);
         log("   reloc_count:  %u\n", section->relocation_count);
 
         for (u32 ri=0; ri < section->relocation_count; ri++) {
@@ -196,25 +209,26 @@ void barf_dump(BarfObject* object) {
 
 bool barf_convert_from_coff(const char* path, const char* output) {
     BarfObject* object   = NULL;
-    FILE*       file     = NULL;
+    FSHandle    file     = FS_INVALID_HANDLE;
     u8*         data     = NULL;
     u64         dataSize = 0;
     
-    file = fopen(path, "rb");
-    if (!file) {
-        fprintf(stderr, "barf: could not read '%s'\n", path);
+    file = fs__open(path, FS_READ);
+    if (IS_INVALID_FS_HANDLE(file)) {
+        log_error("barf: could not read '%s'\n", path);
         goto cleanup;
     }
 
-    fseek(file, 0, SEEK_END);
-    dataSize = ftell(file);
-    fseek(file, 0, SEEK_SET);
+    FSInfo fileInfo;
+    fs__info(file, &fileInfo);
+    dataSize = fileInfo.file_size;
 
-    data = malloc(COFF_File_Header_SIZE);
+    data = mem__alloc(COFF_File_Header_SIZE, NULL);
 
+    uint64_t fs_head = 0;
     // printf("filesize %d\n", (int)filesize);
 
-    size_t read_bytes = fread(data, 1, COFF_File_Header_SIZE, file);
+    size_t read_bytes = file_read(file, &fs_head, data, COFF_File_Header_SIZE);
     // LOOP
     if(read_bytes != COFF_File_Header_SIZE) {
         // not COFF
@@ -235,19 +249,19 @@ bool barf_convert_from_coff(const char* path, const char* output) {
     }
 
     // Probably COFF, read rest of file at once (easiest)
-    data = realloc(data, dataSize);
-    read_bytes = fread(data + COFF_File_Header_SIZE, 1, dataSize - COFF_File_Header_SIZE, file);
+    data = mem__alloc(dataSize, data);
+    read_bytes = file_read(file, &fs_head, data + COFF_File_Header_SIZE, dataSize - COFF_File_Header_SIZE);
     if(read_bytes != dataSize - COFF_File_Header_SIZE) {
-        fprintf(stderr, "barf: could not read all bytes '%s'\n", path);
+        log_error("barf: could not read all bytes '%s'\n", path);
         goto cleanup;
     }
 
-    fclose(file);
-    file = NULL;
+    fs__close(file);
+    file = FS_INVALID_HANDLE;
     
     header = (COFF_File_Header*) data; // set again after realloc
     
-    object = malloc(sizeof(*object));
+    object = mem__alloc(sizeof(*object), NULL);
     memset(object, 0, sizeof(*object));
 
     object->header.magic = BARF_MAGIC;
@@ -262,12 +276,12 @@ bool barf_convert_from_coff(const char* path, const char* output) {
         default: strcpy(object->header.target, "unknown");
     }
 
-    object->sections = malloc(header->NumberOfSections * sizeof(*object->sections));
+    object->sections = mem__alloc(header->NumberOfSections * sizeof(*object->sections), NULL);
     memset(object->sections, 0, header->NumberOfSections * sizeof(*object->sections));
 
     
     u64 size_of_relocations_list = header->NumberOfSections * sizeof(*object->relocations);
-    object->relocations = malloc(size_of_relocations_list);
+    object->relocations = mem__alloc(size_of_relocations_list, NULL);
     memset(object->relocations, 0, size_of_relocations_list);
 
 
@@ -279,7 +293,7 @@ bool barf_convert_from_coff(const char* path, const char* output) {
         int section_index;
     } SectionInfo;
 
-    SectionInfo* section_infos = malloc(sizeof(SectionInfo) * header->NumberOfSections);
+    SectionInfo* section_infos = mem__alloc(sizeof(SectionInfo) * header->NumberOfSections, NULL);
     memset(section_infos, 0, sizeof(SectionInfo) * header->NumberOfSections);
 
     for (int i = 0; i < header->NumberOfSections; i++) {
@@ -303,7 +317,7 @@ bool barf_convert_from_coff(const char* path, const char* output) {
 
         int namelen = strlen(name);
         if (namelen >= sizeof(sec->name)) {
-            fprintf(stderr, "  name to long, '%s'\n", name);
+            log_warning("  name to long, '%s'\n", name);
             continue;
         }
         if (section->SizeOfRawData == 0) {
@@ -334,10 +348,10 @@ bool barf_convert_from_coff(const char* path, const char* output) {
         sec->alignment = 1 << (((section->Characteristics >> 20) & 0xF) - 1);
     }
 
-    object->strings = malloc(size_of_strings);
+    object->strings = mem__alloc(size_of_strings, NULL);
     memset(object->strings, 0, size_of_strings);
 
-    object->symbols = malloc(header->NumberOfSymbols * sizeof(*object->symbols));
+    object->symbols = mem__alloc(header->NumberOfSymbols * sizeof(*object->symbols), NULL);
     memset(object->symbols, 0, header->NumberOfSymbols * sizeof(*object->symbols));
 
     // Need a way to map Coff symbol numbers to barf symbol indexes, since aux symbols aren't carried over and number indexes don't map 1:1
@@ -345,7 +359,7 @@ bool barf_convert_from_coff(const char* path, const char* output) {
     typedef struct {
         u32 symbol_index;
     } SymbolInfo;
-    SymbolInfo* symbol_infos = malloc(sizeof(SymbolInfo) * header->NumberOfSymbols);
+    SymbolInfo* symbol_infos = mem__alloc(sizeof(SymbolInfo) * header->NumberOfSymbols, NULL);
     memset(symbol_infos, 0, sizeof(SymbolInfo) * header->NumberOfSymbols);
 
     u64 next_string_offset = 0;
@@ -382,6 +396,12 @@ bool barf_convert_from_coff(const char* path, const char* output) {
             } else {
                 sym->type = BARF_SYMBOL_GLOBAL;
             }
+            if (sym->section_index == -1) {
+                // .data symbol refers to .data section but it was not added because it was empty.
+                continue;
+            }
+
+            ASSERT(sym->section_index != -1);
         }
         sym->string_offset = next_string_offset;
 
@@ -413,7 +433,7 @@ bool barf_convert_from_coff(const char* path, const char* output) {
         if (!section->NumberOfRelocations) {
             continue;
         }
-        BarfRelocation* relocations = malloc(section->NumberOfRelocations * sizeof(BarfRelocation));
+        BarfRelocation* relocations = mem__alloc(section->NumberOfRelocations * sizeof(BarfRelocation), NULL);
         object->relocations[si] = relocations;
         memset(relocations, 0, section->NumberOfRelocations * sizeof(BarfRelocation));
         sec->relocation_offset = section->PointerToRelocations;
@@ -432,16 +452,16 @@ bool barf_convert_from_coff(const char* path, const char* output) {
                 rel->offset = relocation->VirtualAddress;
                 sec->relocation_count++;
             } else {
-                printf("barf: Unhandled coff reloc type %d, sym index %u\n", relocation->Type, symbol_index);
+                log_warning("barf: Unhandled coff reloc type %d, sym index %u\n", relocation->Type, symbol_index);
             }
         }
     }
 
     // barf_dump(object);
 
-    file = fopen(output, "wb");
-    if (!file) {
-        fprintf(stderr, "barf: Could not open '%s'\n", output);
+    file = fs__open(output, FS_WRITE);
+    if (IS_INVALID_FS_HANDLE(file)) {
+        log_error("barf: Could not open '%s'\n", output);
         goto cleanup;
     }
 
@@ -461,8 +481,7 @@ bool barf_convert_from_coff(const char* path, const char* output) {
 
         u64 new_offset = next_section_data_offset;
 
-        fseek(file, next_section_data_offset, SEEK_SET);
-        fwrite(data + section->data_offset, 1, section->data_size, file);
+        fs__write(file, next_section_data_offset, data + section->data_offset, section->data_size);
 
         next_section_data_offset += section->data_size;
 
@@ -472,40 +491,39 @@ bool barf_convert_from_coff(const char* path, const char* output) {
 
         new_offset = next_section_data_offset;
 
-        fseek(file, next_section_data_offset, SEEK_SET);
-        fwrite(object->relocations[i], sizeof(BarfRelocation), section->relocation_count, file);
+        fs__write(file, next_section_data_offset, object->relocations[i], sizeof(BarfRelocation) * section->relocation_count);
         
         section->relocation_offset = new_offset;
 
         next_section_data_offset += section->relocation_count * sizeof(BarfRelocation);
     }
     
-    object->header.total_size = ftell(file);
+    object->header.total_size = next_section_data_offset;
 
-    fseek(file, 0, SEEK_SET);
-    fwrite(&object->header, sizeof(object->header), 1, file);
+    fs_head = 0;
+    file_write(file, &fs_head, &object->header, sizeof(object->header));
 
-    fwrite(object->sections, sizeof(*object->sections), object->header.section_count, file);
+    file_write(file, &fs_head, object->sections, sizeof(*object->sections) * object->header.section_count);
     
-    fwrite(object->symbols, sizeof(*object->symbols), object->header.symbol_count, file);
+    file_write(file, &fs_head, object->symbols, sizeof(*object->symbols) * object->header.symbol_count);
     
-    fwrite(object->strings, 1, object->header.string_size, file);
-    fclose(file);
-    free(object);
+    file_write(file, &fs_head, object->strings, object->header.string_size);
+    fs__close(file);
+    mem__alloc(0, object);
     return true;
 
 cleanup:
     if (file)
-        fclose(file);
+        fs__close(file);
     if (object)
-        free(object);
+        mem__alloc(0, object);
     if (data)
-        free(data);
+        mem__alloc(0, data);
     return false;
 }
 bool barf_convert_from_elf(const char* path, const char* output) {
     // Elf64_Ehdr* header = (Elf64_Ehdr*)data;
-    // object->sections = malloc(header->e_shnum * sizeof(*object->sections));
+    // object->sections = heap_alloc(header->e_shnum * sizeof(*object->sections));
     // memset(object->sections, 0, header->e_shnum * sizeof(*object->sections));
 
     // Elf64_Shdr* sections = (Elf64_Shdr*)(data + header->e_shoff);
@@ -538,16 +556,14 @@ bool barf_convert_from_elf(const char* path, const char* output) {
     return false;
 }
 
-void transfer_bytes(FILE* input, u64 in_offset, FILE* output, u64 out_offset, u64 size) {
+void transfer_bytes(FSHandle input, u64 in_offset, FSHandle output, u64 out_offset, u64 size) {
     #define TRANSFER_BUFFER_SIZE 4096
-    char buffer[TRANSFER_BUFFER_SIZE];
-    fseek(input, in_offset, SEEK_SET);
-    fseek(output, out_offset, SEEK_SET);
+    static char buffer[TRANSFER_BUFFER_SIZE];
     while (size > 0) {
         u64 chunk_size = size < TRANSFER_BUFFER_SIZE ? size : TRANSFER_BUFFER_SIZE;
-        size_t read_bytes = fread(buffer, 1, chunk_size, input);
+        size_t read_bytes = fs__read(input, in_offset, buffer, chunk_size);
         ASSERT(read_bytes == chunk_size);
-        size_t written_bytes = fwrite(buffer, 1, chunk_size, output);
+        size_t written_bytes = fs__write(output, out_offset, buffer, chunk_size);
         ASSERT(written_bytes == chunk_size);
         size -= chunk_size;
     }
@@ -573,12 +589,12 @@ bool barf_combine_to_artifact(int input_count, const char** input_files, const c
 
     int    ba_path_text_cap = 0x10000;
     int    ba_path_text_len = 0;
-    char*  ba_path_text     = malloc(ba_path_text_cap);
-    const char** ba_paths         = malloc(sizeof(char*) * input_count);
+    char*  ba_path_text     = mem__alloc(ba_path_text_cap, NULL);
+    const char** ba_paths   = mem__alloc(sizeof(char*) * input_count, NULL);
 
     for (int i=0;i<input_count;i++) {
         const char* input = input_files[i];
-        const char* ba_path = ba_path_text + ba_path_text_len;
+        char* ba_path = ba_path_text + ba_path_text_len;
         ba_paths[i] = ba_path;
         int input_len = strlen(input);
         int dot = input_len-1;
@@ -600,7 +616,7 @@ bool barf_combine_to_artifact(int input_count, const char** input_files, const c
             ba_paths[i] = input;
     }
 
-    BarfObject** objects = malloc(sizeof(BarfObject*) * input_count);
+    BarfObject** objects = mem__alloc(sizeof(BarfObject*) * input_count, NULL);
 
     int estimated_symbol_count = 0;
     int estimated_section_count = 0;
@@ -615,7 +631,7 @@ bool barf_combine_to_artifact(int input_count, const char** input_files, const c
 
         if (i != 0) {
             if (strcmp(objects[0]->header.target, objects[i]->header.target)) {
-                fprintf(stderr, "barf: Target architectures did not match, %s vs %s (%s and %s)\n", objects[0]->header.target, objects[i]->header.target, input_files[0], input_files[i]);
+                log_error("barf: Target architectures did not match, %s vs %s (%s and %s)\n", objects[0]->header.target, objects[i]->header.target, input_files[0], input_files[i]);
                 goto cleanup;
             }
         }
@@ -624,28 +640,28 @@ bool barf_combine_to_artifact(int input_count, const char** input_files, const c
         estimated_string_size   += objects[i]->header.string_size;
     }
 
-    BarfObject* merged = malloc(sizeof(BarfObject));
+    BarfObject* merged = mem__alloc(sizeof(BarfObject), NULL);
     memset(merged, 0, sizeof(*merged));
     merged->header.magic = BARF_MAGIC;
     merged->header.version = 1;
     memcpy(merged->header.target, objects[0]->header.target, sizeof(merged->header.target));
     
-    merged->sections = malloc(sizeof(BarfSection) * estimated_section_count);
+    merged->sections = mem__alloc(sizeof(BarfSection) * estimated_section_count, NULL);
     memset(merged->sections, 0, sizeof(BarfSection) * estimated_section_count);
     // merged->header.section_count = estimated_section_count;
    
-    merged->relocations = malloc(sizeof(BarfRelocation*) * estimated_section_count);
+    merged->relocations = mem__alloc(sizeof(BarfRelocation*) * estimated_section_count, NULL);
     memset(merged->relocations, 0, sizeof(BarfRelocation*) * estimated_section_count);
 
-    merged->strings = malloc(estimated_string_size);
+    merged->strings = mem__alloc(estimated_string_size, NULL);
 
     // @TODO We have tons of memory leaks here. Fix 'em up
 
     // @TODO The same strings may exist in some artifacts, especially symbol names. (only symbol names use string data at the moment)
     //    We could create string data from symbols names anew.
 
-    int* string_mapping = malloc(input_count * sizeof(int));
-    int** section_mapping = malloc(input_count * sizeof(int*));
+    int* string_mapping = heap_alloc(input_count * sizeof(int));
+    int** section_mapping = heap_alloc(input_count * sizeof(int*));
     for (int oi=0; oi<input_count;oi++) {
         BarfObject* object = objects[oi];
 
@@ -653,7 +669,7 @@ bool barf_combine_to_artifact(int input_count, const char** input_files, const c
         // memcpy(merged->strings + merged->header.string_size, object->strings, object->header.string_size);
         // merged->header.string_size += object->header.string_size;
 
-        section_mapping[oi] = malloc(object->header.section_count * sizeof(int));
+        section_mapping[oi] = heap_alloc(object->header.section_count * sizeof(int));
 
         for (int si=0;si<object->header.section_count;si++) {
             BarfSection* section = &object->sections[si];
@@ -678,10 +694,10 @@ bool barf_combine_to_artifact(int input_count, const char** input_files, const c
     // Create a map from [symbol index] to [merged symbol index]
 
     // Merge external and global symbols, symbols, merg
-    merged->symbols = malloc(sizeof(BarfSymbol) * estimated_symbol_count);
+    merged->symbols = heap_alloc(sizeof(BarfSymbol) * estimated_symbol_count);
     memset(merged->symbols, 0, sizeof(BarfSymbol) * estimated_symbol_count);
 
-    int** symbol_mapping = malloc(input_count * sizeof(int*));
+    int** symbol_mapping = heap_alloc(input_count * sizeof(int*));
 
     // @TODO Consider separating local,external,global symbol lists so
     //  it's easier to merge, add and remove the different types.
@@ -692,7 +708,7 @@ bool barf_combine_to_artifact(int input_count, const char** input_files, const c
 
     for (int bi=0;bi<input_count;bi++) {
         BarfObject* object = objects[bi];
-        symbol_mapping[bi] = malloc(object->header.symbol_count * sizeof(int));
+        symbol_mapping[bi] = heap_alloc(object->header.symbol_count * sizeof(int));
         memset(symbol_mapping[bi], 0xDE, object->header.symbol_count * sizeof(int));
 
         
@@ -772,7 +788,7 @@ bool barf_combine_to_artifact(int input_count, const char** input_files, const c
                         if (!strcmp(name, merge_name)) {
                             // @TODO Do a search in previous artifacts and find where the first symbol came from.
                             //    Error message is better if we show the two artifacts that have colliding symbols.
-                            fprintf(stderr, "barf: Duplicate global symbol %s, cannot combine! (second here %s)\n", name, input_files[bi]);
+                            log_error("barf: Duplicate global symbol %s, cannot combine! (second here %s)\n", name, input_files[bi]);
                             goto cleanup;
                         }
                     } else if (merged_symbol->type == BARF_SYMBOL_EXTERNAL) {
@@ -807,7 +823,7 @@ bool barf_combine_to_artifact(int input_count, const char** input_files, const c
                 merged->header.string_size += len + 1;
                 // debug("global %d %s\n", merged->header.symbol_count-1, merged->strings + merged_symbol->string_offset);
             } else {
-                fprintf(stderr, "barf: Unhandled symbol %s in %s\n", name, ba_paths[bi]);
+                log_error("barf: Unhandled symbol %s in %s\n", name, ba_paths[bi]);
             }
         }
     }
@@ -820,7 +836,7 @@ bool barf_combine_to_artifact(int input_count, const char** input_files, const c
 
             BarfSection* merged_section = &merged->sections[section_mapping[bi][si]];
             merged_section->relocation_count = section->relocation_count;
-            BarfRelocation* relocations = malloc(sizeof(BarfRelocation) * section->relocation_count);
+            BarfRelocation* relocations = heap_alloc(sizeof(BarfRelocation) * section->relocation_count);
             merged->relocations[section_mapping[bi][si]] = relocations;
             memcpy(relocations, object->relocations[si], sizeof(BarfRelocation) * section->relocation_count);
 
@@ -836,10 +852,10 @@ bool barf_combine_to_artifact(int input_count, const char** input_files, const c
     // Human-wise it's hard to differentiate the sections, loader wise everything refers
     // to sections by ID so it doesn't matter much?.
 
-    FILE* file;
-    file = fopen(output, "wb");
-    if (!file) {
-        fprintf(stderr, "barf: Could not open '%s'\n", output);
+    FSHandle file;
+    file = fs__open(output, FS_WRITE);
+    if (IS_INVALID_FS_HANDLE(file)) {
+        log_error("barf: Could not open '%s'\n", output);
         goto cleanup;
     }
 
@@ -854,7 +870,7 @@ bool barf_combine_to_artifact(int input_count, const char** input_files, const c
 
     for (int bi=0;bi<input_count;bi++) {
         BarfObject* prev_object = objects[bi];
-        FILE* in_file = fopen(ba_paths[bi], "rb");
+        FSHandle in_file = fs__open(ba_paths[bi], FS_READ);
         for (int si=0;si<prev_object->header.section_count;si++) {
             BarfSection* prev_section = &prev_object->sections[si];
             BarfSection* section = &merged->sections[section_mapping[bi][si]];
@@ -870,38 +886,39 @@ bool barf_combine_to_artifact(int input_count, const char** input_files, const c
             // fwrite(data + section->data_offset, 1, section->data_size, file);
 
             next_section_data_offset += section->data_size;
+                section->data_offset = new_offset;
 
-            section->data_offset = new_offset;
-            
-            next_section_data_offset += (8 - (next_section_data_offset % 8)) % 8;
+            if (section->relocation_count > 0) {
+                next_section_data_offset += (8 - (next_section_data_offset % 8)) % 8;
 
-            new_offset = next_section_data_offset;
+                new_offset = next_section_data_offset;
 
-            // transfer_bytes(in_file, prev_section->data_offset, file, next_section_data_offset, prev_section->data_size);
-            fseek(file, next_section_data_offset, SEEK_SET);
-            size_t written_elements = fwrite(merged->relocations[section_mapping[bi][si]], sizeof(BarfRelocation), section->relocation_count, file);
-            ASSERT(written_elements == section->relocation_count);
-            section->relocation_offset = new_offset;
+                // transfer_bytes(in_file, prev_section->data_offset, file, next_section_data_offset, prev_section->data_size);
+                size_t written_elements = fs__write(file, next_section_data_offset, merged->relocations[section_mapping[bi][si]], sizeof(BarfRelocation) * section->relocation_count);
+                ASSERT(written_elements == sizeof(BarfRelocation) * section->relocation_count);
+                section->relocation_offset = new_offset;
 
-            next_section_data_offset += section->relocation_count * sizeof(BarfRelocation);
+                next_section_data_offset += section->relocation_count * sizeof(BarfRelocation);
+            }
         }
-        fclose(in_file);
+        fs__close(in_file);
     }
     
-    merged->header.total_size = ftell(file);
+    merged->header.total_size = next_section_data_offset;
 
-    fseek(file, 0, SEEK_SET);
-    fwrite(&merged->header, sizeof(merged->header), 1, file);
+    uint64_t fs_head = 0;
 
-    fwrite(merged->sections, sizeof(*merged->sections), merged->header.section_count, file);
+    file_write(file, &fs_head, &merged->header, sizeof(merged->header));
+
+    file_write(file, &fs_head, merged->sections, sizeof(*merged->sections) * merged->header.section_count);
     
-    fwrite(merged->symbols, sizeof(*merged->symbols), merged->header.symbol_count, file);
+    file_write(file, &fs_head, merged->symbols, sizeof(*merged->symbols) * merged->header.symbol_count);
     
-    fwrite(merged->strings, 1, merged->header.string_size, file);
+    file_write(file, &fs_head, merged->strings, merged->header.string_size);
     
     // @TODO Free input objects
-    fclose(file);
-    free(merged);
+    fs__close(file);
+    heap_free(merged);
 
     return true;
 
@@ -912,19 +929,19 @@ cleanup:
     // if (data)
     //     free(data);
     if (merged)
-        free(merged);
+        heap_free(merged);
     if (objects) {
         for (int i=0;i<input_count;i++) {
             if (objects[i]) {
-                free(objects[i]);
+                heap_free(objects[i]);
             }
         }
-        free(objects);
+        heap_free(objects);
     }
     if (ba_path_text)
-        free(ba_path_text);
+        heap_free(ba_path_text);
     if (ba_paths)
-        free(ba_paths);
+        heap_free(ba_paths);
     return false;
 }
 

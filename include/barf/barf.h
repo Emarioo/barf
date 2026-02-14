@@ -1,9 +1,16 @@
+/*
+    C API for
+        Runtime loader
+        Binary Artifact dumper
+        Binary Artifact combiner/converter from object files
+*/
+
 #pragma once
 
 #include "barf/ba_format.h"
 
 // ###########################
-//      LOADER TYPES
+//          TYPES
 // ###########################
 
 typedef struct {
@@ -22,11 +29,6 @@ typedef struct {
     char** external_names;
     int external_names_len;
 } BarfLoader;
-
-// ############################
-//         PARSER TYPES
-// ############################
-
 
 
 typedef struct BarfObject {

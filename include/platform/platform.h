@@ -67,6 +67,18 @@ uint64_t fs__write(FSHandle handle, uint64_t offset, void* buffer, uint64_t size
 // reallocate:  ptr = mem_alloc(4096, ptr)
 // free:        mem_alloc(0, ptr)
 void* mem__alloc(uint64_t size, void* old_ptr);
+// #define mem__malloc(SIZE) mem__alloc(SIZE, NULL)
+// #define mem__realloc(SIZE, PTR) mem__alloc(SIZE, PTR)
+// #define mem__free(PTR) mem__alloc(0, PTR)
+
+#define MEM_READ  0x1
+#define MEM_WRITE 0x2
+#define MEM_EXEC  0x4
+
+void* mem__map(void* address, uint64_t size, int flags);
+void  mem__mapflag(void* address, uint64_t size, int flags);
+void  mem__unmap(void* address, uint64_t size);
+
 
 
 

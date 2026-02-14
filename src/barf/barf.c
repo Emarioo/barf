@@ -6,61 +6,8 @@
 
 #include "platform/platform.h"
 
+
 typedef int (*EntryFN)(const char* path, const char* data, int size);
-
-#ifdef OS_WINDOWS
-    #define WIN32_MEAN_AND_LEAN
-    #include "Windows.h"
-#endif
-#ifdef OS_LINUX
-    #include "sys/mman.h"
-#endif
-
-u8* alloc_memory(u64 size) {
-    #ifdef OS_WINDOWS
-        return VirtualAlloc(NULL, size, MEM_COMMIT, PAGE_READWRITE);
-    #else
-        return mmap(NULL, size, PROT_READ|PROT_WRITE, MAP_ANONYMOUS, -1, 0);
-    #endif
-}
-
-void flag_memory(u8* address, u64 size, BarfSectionFlags flags) {
-    #ifdef OS_WINDOWS
-        u32 mem_flags;
-        if ((flags & BARF_FLAG_EXEC) && (flags & BARF_FLAG_WRITE)) {
-            mem_flags = PAGE_EXECUTE_READWRITE;
-        } else if ((flags & BARF_FLAG_EXEC)) {
-            mem_flags = PAGE_EXECUTE;
-        } else if ((flags & BARF_FLAG_WRITE)) {
-            mem_flags = PAGE_READWRITE;
-        } else {
-            mem_flags = PAGE_READONLY;
-        }
-        DWORD prev_flags;
-        BOOL res = VirtualProtect(address, size, mem_flags, &prev_flags);
-        if (!res) {
-            DWORD val = GetLastError();
-            fprintf(stderr, "flag_memory: win error %u\n", (u32)val);
-        }
-    #else
-        u32 mem_flags = PROT_READ;
-        if ((flags & BARF_FLAG_EXEC)) {
-            mem_flags |= PROT_EXEC;
-        } else if ((flags & BARF_FLAG_WRITE)) {
-            mem_flags |= PROT_WRITE;
-        }
-        mprotect(address, size, mem_flags);
-    #endif
-}
-
-
-void free_memory(u8* address, u64 size) {
-    #ifdef OS_WINDOWS
-        VirtualFree(address, size, MEM_RELEASE);
-    #else
-        munmap(address, size);
-    #endif
-}
 
 void* barf_get_address(BarfLoader* loader, const char* name) {
     BarfObject* object = &loader->objects[0];
@@ -80,7 +27,7 @@ void* barf_get_address(BarfLoader* loader, const char* name) {
     return NULL;
 }
 
-void* barF_find_name(BarfLoader* loader, const char* name) {
+void* barf_find_name(BarfLoader* loader, const char* name) {
     for (int i=0;i<loader->external_names_len;i++) {
         const char* str = loader->external_names[i];
         if (!strcmp(str, name)) {
@@ -110,9 +57,9 @@ bool barf_apply_relocations(BarfLoader* loader) {
             if (relocation->type == BARF_RELOC_REL32) {
                 void* target_address;
                 if (symbol->section_index == -1) {
-                    target_address = barF_find_name(loader, name);
+                    target_address = barf_find_name(loader, name);
                     if (!target_address) {
-                        fprintf(stderr, "barf: Cannot relocate external symbol '%s' at %s+0x%x\n", name, section->name, relocation->offset);
+                        log__printf("barf: Cannot relocate external symbol '%s' at %s+0x%x\n", name, section->name, relocation->offset);
                         return false;
                     }
                 } else {
@@ -130,7 +77,7 @@ bool barf_apply_relocations(BarfLoader* loader) {
 
                 *rel_value += (u8*)target_address - ((u8*)rel_value + 4);
             } else {
-                fprintf(stderr, "barf: Unhandled relocation type %u, %s\n", (u32)relocation->type, name);
+                log__printf("barf: Unhandled relocation type %u, %s\n", (u32)relocation->type, name);
             }
         }
     }
@@ -152,11 +99,11 @@ void emit_jmp(void* code_address, void* function_address) {
 void create_platform(BarfLoader* loader) {
     int max_funcs = 128;
     int size = JUMP_ENTRY_STRIDE * max_funcs;
-    void* ptr = alloc_memory(size);
+    void* ptr = mem__map(NULL, size, MEM_READ|MEM_WRITE);
     loader->external_segment = ptr;
 
-    char** names = malloc(8 * max_funcs);
-    char* text = malloc(max_funcs * 50);
+    char** names = mem__alloc(8 * max_funcs, NULL);
+    char* text = mem__alloc(max_funcs * 50, NULL);
     int text_len = 0;
     
     loader->external_names = names;
@@ -174,6 +121,9 @@ void create_platform(BarfLoader* loader) {
     }
 
     ADD(mem__alloc)
+    ADD(mem__map)
+    ADD(mem__mapflag)
+    ADD(mem__unmap)
     ADD(fs__open)
     ADD(fs__close)
     ADD(fs__info)
@@ -184,7 +134,16 @@ void create_platform(BarfLoader* loader) {
     #undef ADD
     
 
-    flag_memory(ptr, size, BARF_FLAG_EXEC);
+    mem__mapflag(ptr, size, MEM_EXEC|MEM_READ);
+}
+
+int barf_to_mem_flag(BarfSectionFlags flags) {
+    int res = MEM_READ;
+    if (flags & BARF_FLAG_WRITE)
+        res |= MEM_WRITE;
+    if (flags & BARF_FLAG_EXEC)
+        res |= MEM_EXEC;
+    return res;
 }
 
 bool barf_init_refptr(BarfLoader* loader) {
@@ -193,16 +152,33 @@ bool barf_init_refptr(BarfLoader* loader) {
     for (int si=0;si<object->header.symbol_count;si++) {
         BarfSymbol*  symbol = &object->symbols[si];
         const char* name = object->strings + symbol->string_offset;
-        if (strncmp(name, ".refptr.", 8)) {
+        if (name[0] != '.') {
             continue;
         }
-        const char* target_name = name + 8;
+        const char* pos = strchr(name, '$');
+        const char* target_name;
+        if (!pos) {
+            // ".refptr.counter"
+            if (strncmp(name, ".refptr.", 8)) {
+                continue;
+            }
+            target_name = name + 8;
+        } else {
+            // ".rdata$.refptr.counter"
+            if (strncmp(pos + 1, ".refptr.", 8)) {
+                continue;
+            }
+            target_name = pos + 1 + 8;
+        }
 
         BarfSegment* segment = &object->segments[symbol->section_index];
         
         void* symbol_address = barf_get_address(loader, target_name);
+        if (!symbol_address)
+            symbol_address = barf_find_name(loader, target_name);
+
         if (!symbol_address) {
-            fprintf(stderr, "barf: Could not find %s referred to by %s\n", target_name, name);
+            log__printf("barf: Could not find %s referred to by %s\n", target_name, name);
             return false;
         }
         *(void**)(segment->address + symbol->offset) = symbol_address;
@@ -210,14 +186,34 @@ bool barf_init_refptr(BarfLoader* loader) {
     return true;
 }
 
+void dump_hex(void* address, int size, int stride) {
+    u8* data = address;
+    log__printf("hexdump 0x"FL"x + 0x%x:\n", (uint64_t)address, size);
+    int col = 0;
+    uint64_t head = 0;
+    while (head < size) {
+        if (col == 0)
+            log__printf("  "FL"x: ", (char*)address + head);
+
+        log__printf("%x%x ", data[head] >> 4, data[head] & 0xF);
+        col++;
+        if (col >= stride) {
+            col = 0;
+            log__printf("\n");
+        }
+        head++;
+    }
+    if (col != 0)
+        log__printf("\n");
+}
 
 bool barf_load_file(const char* path, int argc, const char** argv) {
     BarfLoader* loader = NULL;
     BarfObject* object = NULL;
 
-    loader = malloc(sizeof(*loader));
+    loader = mem__alloc(sizeof(*loader), NULL);
     if(!loader) {
-        fprintf(stderr, "barf: malloc failed\n");
+        log__printf("barf: malloc failed\n");
         goto cleanup;
     }
     memset(loader, 0, sizeof(*loader));
@@ -232,10 +228,10 @@ bool barf_load_file(const char* path, int argc, const char** argv) {
     loader->objects = object;
     loader->object_count = 1;
 
-    object->segments = malloc(sizeof(*object->segments) * object->header.section_count);
+    object->segments = mem__alloc(sizeof(*object->segments) * object->header.section_count, NULL);
     memset(object->segments, 0, sizeof(*object->segments) * object->header.section_count);
 
-    FILE* file = fopen(path, "rb");
+    FSHandle file = fs__open(path, FS_READ);
 
     for (int i=0; i< object->header.section_count;i++) {
         BarfSection* section = &object->sections[i];
@@ -246,17 +242,17 @@ bool barf_load_file(const char* path, int argc, const char** argv) {
         }
 
         // @TODO Ensure section alignment
-        segment->address = alloc_memory(section->data_size);
+        segment->address = mem__map(NULL, section->data_size, MEM_READ|MEM_WRITE);
 
         if ((section->flags & BARF_FLAG_ZEROED) == 0) {
-            int res = fseek(file, section->data_offset, SEEK_SET);
-            ASSERT(res == 0);
-            size_t read_bytes = fread(segment->address, 1, section->data_size, file);
+            size_t read_bytes = fs__read(file, section->data_offset, segment->address, section->data_size);
             ASSERT(read_bytes == section->data_size);
         }
+        // log__printf("Section %s\n", section->name);
+        // dump_hex(segment->address, section->data_size, 16);
     }
 
-    fclose(file);
+    fs__close(file);
 
     // Apply relocations
     bool res = barf_apply_relocations(loader);
@@ -268,6 +264,12 @@ bool barf_load_file(const char* path, int argc, const char** argv) {
     if (!res) {
         goto cleanup;
     }
+    // for (int i=0; i< object->header.section_count;i++) {
+    //     BarfSection* section = &object->sections[i];
+    //     BarfSegment* segment = &object->segments[i];
+    //     log__printf("Section %s\n", section->name);
+    //     dump_hex(segment->address, section->data_size, 16);
+    // }
     
     // Set protection flags, previously we set read and write flags so we could memcpy and apply relocations.
     for (int i=0; i< object->header.section_count;i++) {
@@ -277,15 +279,14 @@ bool barf_load_file(const char* path, int argc, const char** argv) {
         if (section->flags & BARF_FLAG_IGNORE) {
             continue; 
         }
-       flag_memory(segment->address, section->data_size, section->flags);
+       mem__mapflag(segment->address, section->data_size, barf_to_mem_flag(section->flags));
     }
 
     // Find entry symbol
-    const char* entry_name = "entry";
-    // const char* entry_name = "main";
+    const char* entry_name = "ba_entry";
     EntryFN entry = (EntryFN)barf_get_address(loader, entry_name);
     if (!entry) {
-        fprintf(stderr, "barf: Could not find entry point '%s'\n", entry_name);
+        log__printf("barf: Could not find entry point '%s'\n", entry_name);
         goto cleanup;
     }
 
@@ -295,7 +296,7 @@ bool barf_load_file(const char* path, int argc, const char** argv) {
     int arg_data_len = 0;
     if (argc > 0) {
         int arg_data_cap = argc * 50;
-        arg_data = malloc(arg_data_cap);
+        arg_data = mem__alloc(arg_data_cap, NULL);
         for (int i = 0; i < argc;i++) {
             int len = strlen(argv[i]);
             if (arg_data_len != 0) {
@@ -308,7 +309,7 @@ bool barf_load_file(const char* path, int argc, const char** argv) {
     }
 
     int result = entry(path, arg_data, arg_data_len);
-    printf("Exit code: %d", result);
+    log__printf("Exit code: %d", result);
 
     // alloc memory
 
@@ -318,7 +319,8 @@ bool barf_load_file(const char* path, int argc, const char** argv) {
         if (section->flags & BARF_FLAG_IGNORE) {
             continue;
         }
-        free_memory(segment->address, section->data_size);
+        mem__unmap(segment->address, section->data_size);
+        segment->address = NULL;
     }
 
     return true;

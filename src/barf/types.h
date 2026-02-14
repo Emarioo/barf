@@ -2,9 +2,12 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+// @TODO We use snprintf from stdio, remove header, implement on our own?
+#include <libc/stdio.h>
+#include <libc/stdlib.h>
+#include <libc/string.h>
+
+#include "platform/platform.h"
 
 typedef int64_t int64;
 typedef int32_t int32;
@@ -28,11 +31,10 @@ typedef int16_t i16;
 typedef int8_t i8;
 
 #ifdef _WIN32
-    #define OS_WINDOWS
-    #define FLU "%llu"
+    #define FL "%ll"
 #else
-    #define OS_LINUX
-    #define FLU "%lu"
+    #define FL "%l"
 #endif
 
-#define ASSERT(E) ( (E) ? 0 : (fprintf(stderr, "[ASSERT] %s:%d %s\n", __FUNCTION__, __LINE__, #E), *((int*)0) = 5) )
+
+#define ASSERT(E) ( (E) ? 0 : (log__printf("[ASSERT] %s:%d %s\n", __FILE__, __LINE__, #E), *((int*)0) = 5) )
