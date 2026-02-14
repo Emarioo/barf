@@ -452,7 +452,8 @@ bool barf_convert_from_coff(const char* path, const char* output) {
                 rel->offset = relocation->VirtualAddress;
                 sec->relocation_count++;
             } else {
-                log_warning("barf: Unhandled coff reloc type %d, sym index %u\n", relocation->Type, symbol_index);
+                // @TODO What to do with this?
+                // log_warning("barf: Unhandled coff reloc type %d, sym index %u\n", relocation->Type, symbol_index);
             }
         }
     }

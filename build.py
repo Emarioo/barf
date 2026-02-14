@@ -82,7 +82,7 @@ def compile_artifact(output_file, files, flags):
 def cmd(c: str, silent: bool = False):
     c = c.replace("\\", "/")
     
-    print(c)
+    # print(c)
     res = os.system(c)
     if res != 0:
         print(c)

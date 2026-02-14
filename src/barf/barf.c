@@ -309,7 +309,7 @@ bool barf_load_file(const char* path, int argc, const char** argv) {
     }
 
     int result = entry(path, arg_data, arg_data_len);
-    log__printf("Exit code: %d", result);
+    // log__printf("Exit code: %d", result);
 
     // alloc memory
 
