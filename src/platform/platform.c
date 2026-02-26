@@ -9,11 +9,13 @@
     #include <stdlib.h>
 #endif
 #ifdef OS_LINUX
+    #include <unistd.h>
     #include "sys/mman.h"
     #include <stdarg.h>
     #include <stdio.h>
     #include <string.h>
     #include <stdlib.h>
+    #include <errno.h>
 #endif
 
 
@@ -140,13 +142,19 @@ void* mem__alloc(uint64_t size, void* old_ptr) {
     return realloc(old_ptr, size);
 }
 
-
 void* mem__map(void* address, uint64_t size, int flags) {
     #ifdef OS_WINDOWS
         return VirtualAlloc(NULL, size, MEM_COMMIT, PAGE_READWRITE);
     #endif
     #ifdef OS_LINUX
-        return mmap(NULL, size, PROT_READ|PROT_WRITE, MAP_ANONYMOUS, -1, 0);
+        int page_size = getpagesize();
+        uint64_t aligned_size = size % page_size == 0 ? size : size + (page_size - size) % page_size;
+        void* ptr = mmap(NULL, aligned_size, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
+        if (ptr == (void*)-1) {
+            log__printf("barf: mmap failed, %s\n", strerror(errno));
+            return NULL;
+        }
+        return ptr;
     #endif
 }
 void mem__mapflag(void* address, uint64_t size, int flags) {
@@ -175,7 +183,12 @@ void mem__mapflag(void* address, uint64_t size, int flags) {
         } else if ((flags & MEM_WRITE)) {
             mem_flags |= PROT_WRITE;
         }
-        mprotect(address, size, mem_flags);
+        int page_size = getpagesize();
+        uint64_t aligned_size = size % page_size == 0 ? size : size + (page_size - size) % page_size;
+        int res = mprotect(address, aligned_size, mem_flags);
+        if (res < 0) {
+            log__printf("barf: mprotect failed, %s\n", strerror(errno));
+        }
     #endif
 }
 void mem__unmap(void* address, uint64_t size) {

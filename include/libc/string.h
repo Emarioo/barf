@@ -1,8 +1,8 @@
 #pragma once
 
 #include <stdint.h>
+#include <stddef.h>
 
-typedef unsigned long long size_t;
 
 size_t strlen(const char *a);
 

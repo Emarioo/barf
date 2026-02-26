@@ -31,12 +31,13 @@ def compile():
     
     artifact = "barf.ba"
     artifact_flags = f"-I{ROOT}/include -I{ROOT}/src {WARN_FLAGS} {NOLIB_FLAGS}"
-    compile_artifact(artifact, BARF_FILES + LIBC_FILES, artifact_flags)
+    # compile_artifact(artifact, BARF_FILES + LIBC_FILES, artifact_flags)
 
     compile_artifact("pro.ba", ["examples/wa.c","examples/util.c"] + LIBC_FILES, artifact_flags)
     # compile_artifact("pro.ba", ["examples/wa.c","examples/util.c"], artifact_flags)
 
     # os.system("barf -d barf.ba")
+    # os.system("barf -d pro.ba")
 
     # os.system("barf barf.ba -- wa.ba")
 
@@ -82,7 +83,7 @@ def compile_artifact(output_file, files, flags):
 def cmd(c: str, silent: bool = False):
     c = c.replace("\\", "/")
     
-    # print(c)
+    print(c)
     res = os.system(c)
     if res != 0:
         print(c)

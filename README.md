@@ -1,13 +1,50 @@
 
 This project explores loaders and formats for executables, libraries, and object files.
 
-The general idea is:
+*A Binary Artifact represents .lib, .dll, .o, .exe at the same time. Static and dynamic libraries are semantically the same and a function from an object file can simply be executed without linking.*
 
-*Binary Artifacts represent .lib, .dll, .o, .exe at the same time. Static and dynamic libraries are not different things. A library and an object file are the same thing.*
+File extension for **Binary Artifact** is `.ba`.
 
-.ba = Binary Artifact file extension
+# Usage
+
+```c
+// main.c
+void log__printf(char* format, ...);
+
+int ba_entry(const char* path, const char* data, int size) {
+    log__printf("Hello from %s, %d bytes of data\n", path, size);
+    log__printf("  %*.s\n", size, data);
+    return 0;
+}
+```
+
+```bash
+# Compile Object File
+gcc -c main.c
+# Convert to Binary Artifact
+barf -c -o app.ba main.o
+# Run Binary Artifact
+barf app.ba -- Here is data
+
+> Hello from app.ba, 12 bytes of data
+>   Here is data
+```
+
+The projects has
+- BARF Library with C API headers
+    - Runtime loader for Binary Artifacts
+    - Object file to Binary Artifact converter
+    - Binary Artifact dumping (similar objdump)
+- BARF program compiled for Linux/Windows which provides command line arguments to use the library.
+
+
+# Documentation
+
+- [Binary Artifact Format](docs/ba_format.md)
 
 # Building
+
+This builds BARF as a native program (executable on Windows/Linux).
 
 Supports Windows and will support Linux.
 

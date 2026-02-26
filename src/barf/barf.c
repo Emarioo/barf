@@ -109,10 +109,11 @@ void create_platform(BarfLoader* loader) {
     loader->external_names = names;
     loader->external_names_len = 0;
     
+    void* next_func_ptr = ptr;
     #undef ADD
     #define ADD(NAME) {                                                 \
-        emit_jmp(ptr, (void*)(NAME));                                   \
-        ptr =  (char*)ptr + JUMP_ENTRY_STRIDE;                          \
+        emit_jmp(next_func_ptr, (void*)(NAME));                                   \
+        next_func_ptr =  (char*)next_func_ptr + JUMP_ENTRY_STRIDE;                          \
         char* name = text + text_len;                                   \
         memcpy(name, #NAME, strlen(#NAME));                             \
         name[strlen(#NAME)] = '\0';                                     \

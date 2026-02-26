@@ -226,10 +226,8 @@ bool barf_convert_from_coff(const char* path, const char* output) {
     data = mem__alloc(COFF_File_Header_SIZE, NULL);
 
     uint64_t fs_head = 0;
-    // printf("filesize %d\n", (int)filesize);
 
     size_t read_bytes = file_read(file, &fs_head, data, COFF_File_Header_SIZE);
-    // LOOP
     if(read_bytes != COFF_File_Header_SIZE) {
         // not COFF
         return false;
@@ -436,7 +434,6 @@ bool barf_convert_from_coff(const char* path, const char* output) {
         BarfRelocation* relocations = mem__alloc(section->NumberOfRelocations * sizeof(BarfRelocation), NULL);
         object->relocations[si] = relocations;
         memset(relocations, 0, section->NumberOfRelocations * sizeof(BarfRelocation));
-        sec->relocation_offset = section->PointerToRelocations;
 
         for (int ri=0;ri<section->NumberOfRelocations;ri++) {
             COFF_Relocation* relocation = (COFF_Relocation*)(data + section->PointerToRelocations + ri * COFF_Relocation_SIZE);
@@ -523,37 +520,357 @@ cleanup:
     return false;
 }
 bool barf_convert_from_elf(const char* path, const char* output) {
-    // Elf64_Ehdr* header = (Elf64_Ehdr*)data;
-    // object->sections = heap_alloc(header->e_shnum * sizeof(*object->sections));
-    // memset(object->sections, 0, header->e_shnum * sizeof(*object->sections));
+    BarfObject* object   = NULL;
+    FSHandle    file     = FS_INVALID_HANDLE;
+    u8*         data     = NULL;
+    u64         dataSize = 0;
+    
+    file = fs__open(path, FS_READ);
+    if (IS_INVALID_FS_HANDLE(file)) {
+        log_error("barf: could not read '%s'\n", path);
+        goto cleanup;
+    }
 
-    // Elf64_Shdr* sections = (Elf64_Shdr*)(data + header->e_shoff);
-    // // char* names = (char*)data + sections[header->e_shstrndx].sh_offset;
+    debug("Convert %s\n", path);
+
+    FSInfo fileInfo;
+    fs__info(file, &fileInfo);
+    dataSize = fileInfo.file_size;
+
+    data = mem__alloc(sizeof(Elf64_Ehdr), NULL);
+
+    uint64_t fs_head = 0;
+
+    size_t read_bytes = file_read(file, &fs_head, data, sizeof(Elf64_Ehdr));
+    if(read_bytes != sizeof(Elf64_Ehdr)) {
+        // not COFF
+        return false;
+    }
+
+    Elf64_Ehdr* header = (Elf64_Ehdr*)data;
+
+    if (strncmp((char*)header->e_ident, ELFMAG, 4)) {
+        goto cleanup;
+    }
+
+    if (header->e_ident[EI_CLASS] != ELFCLASS64) {
+        log__printf("barf: Cannot handle 32-bit ELF\n");
+        goto cleanup;
+    }
+    if (header->e_ident[EI_DATA] != ELFDATA2LSB) {
+        log__printf("barf: Cannot handle Big Endian ELF\n");
+        goto cleanup;
+    }
+    if (header->e_ident[EI_VERSION] != EV_CURRENT) {
+        log__printf("barf: Cannot handle Big Endian ELF\n");
+        goto cleanup;
+    }
+
+    data = mem__alloc(dataSize, data);
+    read_bytes = file_read(file, &fs_head, data + sizeof(Elf64_Ehdr), dataSize - sizeof(Elf64_Ehdr));
+    if(read_bytes != dataSize - sizeof(Elf64_Ehdr)) {
+        log_error("barf: could not read all bytes '%s'\n", path);
+        goto cleanup;
+    }
+    
+    fs__close(file);
+    file = FS_INVALID_HANDLE;
+    
+    header = (Elf64_Ehdr*) data; // set again after realloc
+    
+    object = mem__alloc(sizeof(*object), NULL);
+    memset(object, 0, sizeof(*object));
+
+    object->header.magic = BARF_MAGIC;
+    object->header.version = 1;
+    object->header.flags = 0; // little endian
+
+    switch (header->e_machine) {
+        case EM_X86_64:  strcpy(object->header.target, "x86_64");  break;
+        case EM_386:     strcpy(object->header.target, "x86");     break;
+        case EM_ARM:     strcpy(object->header.target, "arm");     break;
+        case EM_AARCH64: strcpy(object->header.target, "aarch64"); break;
+        default: strcpy(object->header.target, "unknown");
+    }
+
+    object->sections = mem__alloc(header->e_shnum * sizeof(*object->sections), NULL);
+    memset(object->sections, 0, header->e_shnum * sizeof(*object->sections));
+
+    u64 size_of_relocations_list = header->e_shnum * sizeof(*object->relocations);
+    object->relocations = mem__alloc(size_of_relocations_list, NULL);
+    memset(object->relocations, 0, size_of_relocations_list);
+
+    
+    typedef struct {
+        int section_index;
+        int rela_index;
+        int rel_index;
+    } SectionInfo;
+
+    SectionInfo* section_infos = mem__alloc(sizeof(SectionInfo) * header->e_shnum, NULL);
+    memset(section_infos, 0, sizeof(SectionInfo) * header->e_shnum);
+
+
+    Elf64_Shdr* elf_sections = (Elf64_Shdr*)(data + header->e_shoff);
+    char* elf_section_names = (char*)data + elf_sections[header->e_shstrndx].sh_offset;
     // char* names = (char*)data + header->e_shstrndx;
 
-    // for (int i = 0; i < header->e_shnum; i++) {
-    //     Elf64_Shdr* section = (Elf64_Shdr*)(data + header->e_shoff);
-    //     char* name =  names + section->sh_name;
-    //     printf("%s\n", name);
+    int elf_symbol_table_index = -1;
+    Elf64_Shdr* elf_symbol_table = NULL;
+    Elf64_Shdr* elf_symbol_string_table = NULL;
 
-    //     BarfSection* sec = &object->sections[object->header.section_count];
+    u64 estimated_string_table_size = 0;
 
-    //     int namelen = strlen(name);
-    //     if (namelen >= sizeof(sec->name)) {
-    //         printf("  name to long");
-    //         continue;
-    //     }
+    for (int i = 0; i < header->e_shnum; i++) {
+        Elf64_Shdr* section = &elf_sections[i];
 
-    //     object->header.section_count++;
+        section_infos[i].section_index = -1;
+        section_infos[i].rela_index = -1;
+        section_infos[i].rel_index = -1;
+
+        char* name =  elf_section_names + section->sh_name;
+
+        BarfSection* sec = &object->sections[object->header.section_count];
+
+        if (section->sh_type == SHT_STRTAB) {
+            estimated_string_table_size += section->sh_size;
+        }
+
+        if (section->sh_type == SHT_RELA || section->sh_type == SHT_REL) {
+            char* target_name = name + (section->sh_type == SHT_RELA ? 5 : 4);
+            int found_index = -1;
+            for (int j = 0; j < header->e_shnum; j++) {
+                Elf64_Shdr* current = &elf_sections[j];
+                char* current_name = current->sh_name;
+                if (!strcmp(target_name, current_name)) {
+                    found_index = -1;
+                    break;
+                }
+            }
+            if (found_index != -1) {
+                if (section->sh_type == SHT_RELA) {
+                    section_infos[i].rela_index = found_index;
+                } else {
+                    section_infos[i].rel_index = found_index;
+                }
+            }
+        }
+
+        if (section->sh_type == SHT_SYMTAB) {
+            elf_symbol_table_index = i;
+            elf_symbol_table = section;
+            elf_symbol_string_table = &elf_sections[elf_symbol_table->sh_link];
+            continue;
+        }
+
+        int namelen = strlen(name);
+        if (namelen >= sizeof(sec->name)) {
+            log_warning("  name to long, '%s'\n", name);
+            continue;
+        }
+        if (section->sh_size == 0) {
+            // skip empty sections
+            continue;
+        }
+        if (section->sh_type != SHT_NOTE
+        && section->sh_type != SHT_NOBITS
+        && section->sh_type != SHT_PROGBITS) {
+            continue;
+        }
         
-    //     strcpy(sec->name, name);
-    //     sec->size = section->sh_size;
-    //     sec->offset = 0; // set later
+        section_infos[i].section_index = object->header.section_count;
+        object->header.section_count++;
+        
+        strcpy(sec->name, name);
+        sec->data_size = section->sh_size;
+        sec->data_offset = section->sh_offset; // Temporarily set, update later
 
-    //     // sec->flags = 
-    // }
+        sec->flags = 0;
+        if (section->sh_type == SHT_NOTE || 0 == (section->sh_flags & SHF_ALLOC)) {
+            sec->flags = BARF_FLAG_IGNORE;
+        } else {
+            if (section->sh_type == SHT_NOBITS) {
+                sec->flags |= BARF_FLAG_ZEROED;
+            }
+            if (section->sh_flags & SHF_WRITE) {
+                sec->flags |= BARF_FLAG_WRITE;
+            }
+            if (section->sh_flags & SHF_EXECINSTR) {
+                sec->flags |= BARF_FLAG_EXEC;
+            }
+        }
 
-    // return true;
+        sec->alignment = section->sh_addralign;
+        log__printf("%s\n", name);
+    }
+
+    int symbol_count = elf_sections[elf_symbol_table_index].sh_size / sizeof(Elf64_Sym);
+    
+    object->strings = mem__alloc(estimated_string_table_size, NULL);
+    memset(object->strings, 0, estimated_string_table_size);
+
+    object->symbols = mem__alloc(symbol_count * sizeof(*object->symbols), NULL);
+    memset(object->symbols, 0, symbol_count * sizeof(*object->symbols));
+
+    
+    u64 next_string_offset = 0;
+
+    typedef struct {
+        u32 symbol_index;
+    } SymbolInfo;
+    SymbolInfo* symbol_infos = mem__alloc(sizeof(SymbolInfo) * symbol_count, NULL);
+    memset(symbol_infos, 0, sizeof(SymbolInfo) * symbol_count);
+
+    Elf64_Sym* elf_symbols = (Elf64_Sym*)(data + elf_symbol_table->sh_offset);
+
+    for (int i=0;i<symbol_count;i++) {
+        Elf64_Sym* symbol = &elf_symbols[i];
+        BarfSymbol*    sym = &object->symbols[object->header.symbol_count];
+
+        symbol_infos[i].symbol_index = -1;
+
+        char* name = (data + elf_symbol_string_table->sh_offset + symbol->st_name);
+        int   name_len = strlen(name);
+
+        int bind = ELF64_ST_BIND(symbol->st_info);
+        int type = ELF64_ST_TYPE(symbol->st_info);
+
+        if (bind == STB_LOCAL) {
+            sym->type = BARF_SYMBOL_LOCAL;
+        } else if (bind == STB_GLOBAL) {
+            sym->type = BARF_SYMBOL_GLOBAL;
+        }
+        sym->section_index = section_infos[symbol->st_shndx].section_index;
+        sym->offset = symbol->st_value;
+        
+        sym->string_offset = next_string_offset;
+
+        memcpy(object->strings + next_string_offset, name, name_len + 1);
+        next_string_offset += name_len + 1;
+
+        symbol_infos[i].symbol_index = object->header.symbol_count;
+        object->header.symbol_count++;
+    }
+
+    object->header.string_size = next_string_offset;
+    
+    
+    for (int si = 0; si < header->e_shnum; si++) {
+        Elf64_Shdr*  section = &elf_sections[si];
+        SectionInfo* section_info = &section_infos[si];
+
+        if (section_info->section_index == -1) {
+            continue;
+        }
+        BarfSection* sec = &object->sections[section_info->section_index];
+
+        if (section_info->rel_index == -1 && section_info->rela_index == -1) {
+            // no relocations
+            continue;
+        }
+
+        Elf64_Shdr* rel_section = section_info->rel_index == -1 ? NULL : &elf_sections[section_info->rel_index];
+        Elf64_Shdr* rela_section = section_info->rela_index == -1 ? NULL : &elf_sections[section_info->rela_index];
+
+        int relocation_count = (rel_section ? rel_section->sh_size / rel_section->sh_entsize : 0) + (rela_section ? rela_section->sh_size / rela_section->sh_entsize : 0);
+
+
+        BarfRelocation* relocations = mem__alloc(relocation_count * sizeof(BarfRelocation), NULL);
+        object->relocations[si] = relocations;
+        memset(relocations, 0, relocation_count * sizeof(BarfRelocation));
+        // sec->relocation_offset = section->PointerToRelocations;
+
+        for (int ri=0;ri<rel_section->sh_size / rel_section->sh_entsize;ri++) {
+            Elf64_Rel* relocation = (Elf64_Rel*)(data + rel_section->sh_offset + ri * rel_section->sh_entsize);
+            BarfRelocation* rel = &relocations[sec->relocation_count];
+
+            uint32_t rel_sym_index = ELF64_R_SYM(relocation->r_info);
+            uint32_t rel_type = ELF64_R_TYPE(relocation->r_info);
+
+            u32 symbol_index = symbol_infos[rel_sym_index].symbol_index;
+
+            BarfSymbol* symbol = &object->symbols[symbol_index];
+            const char* name = object->strings + symbol->string_offset;
+
+            if (rel_type == R_X86_64_PC32) {
+                rel->type = BARF_RELOC_REL32;
+                rel->symbol_index = symbol_index;
+                rel->offset = relocation->r_offset;
+                sec->relocation_count++;
+            }else if (rel_type == R_X86_64_PLT32) {
+                rel->type = BARF_RELOC_REL32;
+                rel->symbol_index = symbol_index;
+                rel->offset = relocation->r_offset;
+                sec->relocation_count++;
+            } else {
+                // @TODO What to do with this?
+                // log_warning("barf: Unhandled coff reloc type %d, sym index %u\n", relocation->Type, symbol_index);
+            }
+        }
+    }
+
+    // barf_dump(object);
+    
+    file = fs__open(output, FS_WRITE);
+    if (IS_INVALID_FS_HANDLE(file)) {
+        log_error("barf: Could not open '%s'\n", output);
+        goto cleanup;
+    }
+
+    u64 size_of_symbols = sizeof(*object->symbols) * object->header.symbol_count;
+    u64 size_of_sections = sizeof(*object->sections) * object->header.section_count;
+    
+    object->header.section_offset = sizeof(object->header);
+    object->header.symbol_offset  = sizeof(object->header) + size_of_sections;
+    object->header.string_offset  = sizeof(object->header) + size_of_sections + size_of_symbols;
+    
+    u64 next_section_data_offset = sizeof(object->header) + size_of_sections + size_of_symbols + object->header.string_size;
+
+    for (int i = 0; i < object->header.section_count; i++) {
+        BarfSection* section = &object->sections[i];
+
+        next_section_data_offset += (section->alignment - (next_section_data_offset % section->alignment)) % section->alignment;
+
+        u64 new_offset = next_section_data_offset;
+
+        fs__write(file, next_section_data_offset, data + section->data_offset, section->data_size);
+
+        next_section_data_offset += section->data_size;
+
+        section->data_offset = new_offset;
+        
+        next_section_data_offset += (8 - (next_section_data_offset % 8)) % 8;
+
+        new_offset = next_section_data_offset;
+
+        fs__write(file, next_section_data_offset, object->relocations[i], sizeof(BarfRelocation) * section->relocation_count);
+        
+        section->relocation_offset = new_offset;
+
+        next_section_data_offset += section->relocation_count * sizeof(BarfRelocation);
+    }
+    
+    object->header.total_size = next_section_data_offset;
+
+    fs_head = 0;
+    file_write(file, &fs_head, &object->header, sizeof(object->header));
+
+    file_write(file, &fs_head, object->sections, sizeof(*object->sections) * object->header.section_count);
+    
+    file_write(file, &fs_head, object->symbols, sizeof(*object->symbols) * object->header.symbol_count);
+    
+    file_write(file, &fs_head, object->strings, object->header.string_size);
+    fs__close(file);
+    mem__alloc(0, object);
+    return true;
+
+cleanup:
+    if (file)
+        fs__close(file);
+    if (object)
+        mem__alloc(0, object);
+    if (data)
+        mem__alloc(0, data);
     return false;
 }
 
@@ -602,7 +919,7 @@ bool barf_combine_to_artifact(int input_count, const char** input_files, const c
         while (dot > 0 && input[dot] != '.') dot--;
         if (dot != -1)
             input_len -= input_len - dot;
-        ba_path_text_len += 1 + snprintf(ba_path, ba_path_text_cap - ba_path_text_len, "%.*s.ba", input_len, input);
+        ba_path_text_len += 1 + snprintf(ba_path, ba_path_text_cap - ba_path_text_len, "%.*s~.ba", input_len, input);
 
         // @TODO ba_path should be in temporary 'int' directory. Same directory
         //   as the object files will work for now.

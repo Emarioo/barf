@@ -12,6 +12,7 @@
 
 
 typedef enum BarfHeaderFlag {
+    // @TODO Decide whether to support BIG_ENDIAN or not. I'd like not to unless there's a good reason. Will anyone every use this format on a big endian machine? will big endian machines continue to exist in the future?
     BARF_FLAG_BIG_ENDIAN = 0x1, // format is little endian if flag is not present
 } BarfHeaderFlag;
 typedef u32 BarfHeaderFlags;
