@@ -110,7 +110,7 @@ BarfObject* barf_parse_header_from_file(const char* path) {
     return object;
 
 cleanup:
-    if (file)
+    if (!IS_INVALID_FS_HANDLE(file))
         fs__close(file);
     if (object) {
         if (object->sections)
@@ -511,7 +511,7 @@ bool barf_convert_from_coff(const char* path, const char* output) {
     return true;
 
 cleanup:
-    if (file)
+    if (!IS_INVALID_FS_HANDLE(file))
         fs__close(file);
     if (object)
         mem__alloc(0, object);
@@ -531,7 +531,7 @@ bool barf_convert_from_elf(const char* path, const char* output) {
         goto cleanup;
     }
 
-    debug("Convert %s\n", path);
+    // debug("Convert %s\n", path);
 
     FSInfo fileInfo;
     fs__info(file, &fileInfo);
@@ -628,6 +628,11 @@ bool barf_convert_from_elf(const char* path, const char* output) {
         section_infos[i].rela_index = -1;
         section_infos[i].rel_index = -1;
 
+        if (i == 0) {
+            // First section is NULL
+            continue;
+        }
+
         char* name =  elf_section_names + section->sh_name;
 
         BarfSection* sec = &object->sections[object->header.section_count];
@@ -641,17 +646,17 @@ bool barf_convert_from_elf(const char* path, const char* output) {
             int found_index = -1;
             for (int j = 0; j < header->e_shnum; j++) {
                 Elf64_Shdr* current = &elf_sections[j];
-                char* current_name = current->sh_name;
+                char* current_name = elf_section_names + current->sh_name;
                 if (!strcmp(target_name, current_name)) {
-                    found_index = -1;
+                    found_index = j;
                     break;
                 }
             }
             if (found_index != -1) {
                 if (section->sh_type == SHT_RELA) {
-                    section_infos[i].rela_index = found_index;
+                    section_infos[found_index].rela_index = i;
                 } else {
-                    section_infos[i].rel_index = found_index;
+                    section_infos[found_index].rel_index = i;
                 }
             }
         }
@@ -701,7 +706,7 @@ bool barf_convert_from_elf(const char* path, const char* output) {
         }
 
         sec->alignment = section->sh_addralign;
-        log__printf("%s\n", name);
+        // debug("%s\n", name);
     }
 
     int symbol_count = elf_sections[elf_symbol_table_index].sh_size / sizeof(Elf64_Sym);
@@ -729,13 +734,25 @@ bool barf_convert_from_elf(const char* path, const char* output) {
 
         symbol_infos[i].symbol_index = -1;
 
-        char* name = (data + elf_symbol_string_table->sh_offset + symbol->st_name);
+        if (i == 0) {
+            // First symbol is NULL
+            continue;
+        }
+
+        if (symbol->st_shndx >= SHN_LORESERVE) {
+            // Skip symbols with special meaning, ABSOLUTE file symbol for example.
+            continue;
+        }
+
+        char* name = (char*)(data + elf_symbol_string_table->sh_offset + symbol->st_name);
         int   name_len = strlen(name);
 
         int bind = ELF64_ST_BIND(symbol->st_info);
         int type = ELF64_ST_TYPE(symbol->st_info);
 
-        if (bind == STB_LOCAL) {
+        if (symbol->st_shndx == SHN_UNDEF) {
+            sym->type = BARF_SYMBOL_EXTERNAL;
+        } else if (bind == STB_LOCAL) {
             sym->type = BARF_SYMBOL_LOCAL;
         } else if (bind == STB_GLOBAL) {
             sym->type = BARF_SYMBOL_GLOBAL;
@@ -758,6 +775,7 @@ bool barf_convert_from_elf(const char* path, const char* output) {
     for (int si = 0; si < header->e_shnum; si++) {
         Elf64_Shdr*  section = &elf_sections[si];
         SectionInfo* section_info = &section_infos[si];
+        char* name =  elf_section_names + section->sh_name;
 
         if (section_info->section_index == -1) {
             continue;
@@ -776,35 +794,70 @@ bool barf_convert_from_elf(const char* path, const char* output) {
 
 
         BarfRelocation* relocations = mem__alloc(relocation_count * sizeof(BarfRelocation), NULL);
-        object->relocations[si] = relocations;
+        object->relocations[section_info->section_index] = relocations;
         memset(relocations, 0, relocation_count * sizeof(BarfRelocation));
         // sec->relocation_offset = section->PointerToRelocations;
 
-        for (int ri=0;ri<rel_section->sh_size / rel_section->sh_entsize;ri++) {
-            Elf64_Rel* relocation = (Elf64_Rel*)(data + rel_section->sh_offset + ri * rel_section->sh_entsize);
-            BarfRelocation* rel = &relocations[sec->relocation_count];
+        if (rel_section) {
+            for (int ri=0;ri<rel_section->sh_size / rel_section->sh_entsize;ri++) {
+                Elf64_Rel* relocation = (Elf64_Rel*)(data + rel_section->sh_offset + ri * rel_section->sh_entsize);
+                BarfRelocation* rel = &relocations[sec->relocation_count];
 
-            uint32_t rel_sym_index = ELF64_R_SYM(relocation->r_info);
-            uint32_t rel_type = ELF64_R_TYPE(relocation->r_info);
+                uint32_t rel_sym_index = ELF64_R_SYM(relocation->r_info);
+                uint32_t rel_type = ELF64_R_TYPE(relocation->r_info);
 
-            u32 symbol_index = symbol_infos[rel_sym_index].symbol_index;
+                u32 symbol_index = symbol_infos[rel_sym_index].symbol_index;
 
-            BarfSymbol* symbol = &object->symbols[symbol_index];
-            const char* name = object->strings + symbol->string_offset;
+                BarfSymbol* symbol = &object->symbols[symbol_index];
+                const char* name = object->strings + symbol->string_offset;
 
-            if (rel_type == R_X86_64_PC32) {
-                rel->type = BARF_RELOC_REL32;
-                rel->symbol_index = symbol_index;
-                rel->offset = relocation->r_offset;
-                sec->relocation_count++;
-            }else if (rel_type == R_X86_64_PLT32) {
-                rel->type = BARF_RELOC_REL32;
-                rel->symbol_index = symbol_index;
-                rel->offset = relocation->r_offset;
-                sec->relocation_count++;
-            } else {
-                // @TODO What to do with this?
-                // log_warning("barf: Unhandled coff reloc type %d, sym index %u\n", relocation->Type, symbol_index);
+                if (rel_type == R_X86_64_PC32) {
+                    rel->type = BARF_RELOC_REL32;
+                    rel->symbol_index = symbol_index;
+                    rel->offset = relocation->r_offset;
+                    sec->relocation_count++;
+                }else if (rel_type == R_X86_64_PLT32) {
+                    rel->type = BARF_RELOC_REL32;
+                    rel->symbol_index = symbol_index;
+                    rel->offset = relocation->r_offset;
+                    sec->relocation_count++;
+                } else {
+                    // @TODO What to do with this?
+                    // log_warning("barf: Unhandled coff reloc type %d, sym index %u\n", relocation->Type, symbol_index);
+                }
+            }
+        }
+        
+        if (rela_section) {
+            u8* section_data = data + section->sh_offset;
+            for (int ri=0;ri<rela_section->sh_size / rela_section->sh_entsize;ri++) {
+                Elf64_Rela* relocation = (Elf64_Rela*)(data + rela_section->sh_offset + ri * rela_section->sh_entsize);
+                BarfRelocation* rel = &relocations[sec->relocation_count];
+
+                uint32_t rel_sym_index = ELF64_R_SYM(relocation->r_info);
+                uint32_t rel_type = ELF64_R_TYPE(relocation->r_info);
+
+                u32 symbol_index = symbol_infos[rel_sym_index].symbol_index;
+
+                BarfSymbol* symbol = &object->symbols[symbol_index];
+                const char* name = object->strings + symbol->string_offset;
+
+                if (rel_type == R_X86_64_PC32) {
+                    rel->type = BARF_RELOC_REL32;
+                    rel->symbol_index = symbol_index;
+                    rel->offset = relocation->r_offset;
+                    *(u32*)(section_data + rel->offset) = relocation->r_addend + 4;
+                    sec->relocation_count++;
+                }else if (rel_type == R_X86_64_PLT32) {
+                    rel->type = BARF_RELOC_REL32;
+                    rel->symbol_index = symbol_index;
+                    rel->offset = relocation->r_offset;
+                    *(u32*)(section_data + rel->offset) =  relocation->r_addend + 4;
+                    sec->relocation_count++;
+                } else {
+                    // @TODO What to do with this?
+                    // log_warning("barf: Unhandled coff reloc type %d, sym index %u\n", relocation->Type, symbol_index);
+                }
             }
         }
     }
@@ -865,7 +918,7 @@ bool barf_convert_from_elf(const char* path, const char* output) {
     return true;
 
 cleanup:
-    if (file)
+    if (!IS_INVALID_FS_HANDLE(file))
         fs__close(file);
     if (object)
         mem__alloc(0, object);
@@ -891,6 +944,11 @@ bool barf_combine_to_artifact(int input_count, const char** input_files, const c
     // FILE*       file   = NULL;
     // u8*         data   = NULL;
     // BarfObject* object = NULL;
+    BarfObject*  merged = NULL;
+    FSHandle     file = FS_INVALID_HANDLE;
+    BarfObject** objects = NULL;
+    char*        ba_path_text = NULL;
+    const char** ba_paths = NULL;
 
     if (input_count == 0)
         // Should we make empty BA? probably not right?
@@ -907,8 +965,8 @@ bool barf_combine_to_artifact(int input_count, const char** input_files, const c
 
     int    ba_path_text_cap = 0x10000;
     int    ba_path_text_len = 0;
-    char*  ba_path_text     = mem__alloc(ba_path_text_cap, NULL);
-    const char** ba_paths   = mem__alloc(sizeof(char*) * input_count, NULL);
+    ba_path_text = mem__alloc(ba_path_text_cap, NULL);
+    ba_paths     = mem__alloc(sizeof(char*) * input_count, NULL);
 
     for (int i=0;i<input_count;i++) {
         const char* input = input_files[i];
@@ -934,7 +992,7 @@ bool barf_combine_to_artifact(int input_count, const char** input_files, const c
             ba_paths[i] = input;
     }
 
-    BarfObject** objects = mem__alloc(sizeof(BarfObject*) * input_count, NULL);
+    objects = mem__alloc(sizeof(BarfObject*) * input_count, NULL);
 
     int estimated_symbol_count = 0;
     int estimated_section_count = 0;
@@ -958,7 +1016,7 @@ bool barf_combine_to_artifact(int input_count, const char** input_files, const c
         estimated_string_size   += objects[i]->header.string_size;
     }
 
-    BarfObject* merged = mem__alloc(sizeof(BarfObject), NULL);
+    merged = mem__alloc(sizeof(BarfObject), NULL);
     memset(merged, 0, sizeof(*merged));
     merged->header.magic = BARF_MAGIC;
     merged->header.version = 1;
@@ -1106,7 +1164,21 @@ bool barf_combine_to_artifact(int input_count, const char** input_files, const c
                         if (!strcmp(name, merge_name)) {
                             // @TODO Do a search in previous artifacts and find where the first symbol came from.
                             //    Error message is better if we show the two artifacts that have colliding symbols.
-                            log_error("barf: Duplicate global symbol %s, cannot combine! (second here %s)\n", name, input_files[bi]);
+                            const char* first_file = NULL;
+
+                            for (int j=0;j<bi;j++) {
+                                BarfObject* obj = objects[j];
+                                for (int si=0;si<obj->header.symbol_count;si++) {
+                                    char* first_name = obj->strings + obj->symbols[si].string_offset;
+                                    if (strcmp(first_name, name)) {
+                                        first_file = input_files[j];
+                                        break;
+                                    }
+                                }
+                            }
+                            ASSERT(first_file);
+
+                            log_error("barf: Duplicate global symbol %s, cannot combine! (%s, %s)\n", name, first_file, input_files[bi]);
                             goto cleanup;
                         }
                     } else if (merged_symbol->type == BARF_SYMBOL_EXTERNAL) {
@@ -1170,7 +1242,6 @@ bool barf_combine_to_artifact(int input_count, const char** input_files, const c
     // Human-wise it's hard to differentiate the sections, loader wise everything refers
     // to sections by ID so it doesn't matter much?.
 
-    FSHandle file;
     file = fs__open(output, FS_WRITE);
     if (IS_INVALID_FS_HANDLE(file)) {
         log_error("barf: Could not open '%s'\n", output);

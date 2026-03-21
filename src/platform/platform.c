@@ -68,8 +68,11 @@ FSHandle fs__open(const char* path, uint32_t flags) {
 
 
         // @TODO Atomic operation
-        if (handles_len >= MAX_FILE_HANDLES)
+        if (handles_len >= MAX_FILE_HANDLES) {
+            platform_log("Too many file handles open, cannot open %s\n", (int)handle, path);
+            fclose(file);
             return FS_INVALID_HANDLE;
+        }
         FSHandle handle = handles_len;
         handles[handles_len] = file;
         handles_len++;

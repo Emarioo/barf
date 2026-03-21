@@ -6,6 +6,46 @@
 
 #include "platform/platform.h"
 
+// https://sourceware.org/gdb/current/onlinedocs/gdb.html/Declarations.html#Declarations
+typedef enum
+{
+  JIT_NOACTION = 0,
+  JIT_REGISTER_FN,
+  JIT_UNREGISTER_FN
+} jit_actions_t;
+
+struct jit_code_entry
+{
+  struct jit_code_entry *next_entry;
+  struct jit_code_entry *prev_entry;
+  const char *symfile_addr;
+  uint64_t symfile_size;
+};
+
+struct jit_descriptor
+{
+  uint32_t version;
+  /* This type should be jit_actions_t, but we use uint32_t
+     to be explicit about the bitwidth.  */
+  uint32_t action_flag;
+  struct jit_code_entry *relevant_entry;
+  struct jit_code_entry *first_entry;
+};
+
+/* GDB puts a breakpoint in this function.  */
+// void __jit_debug_register_code() { }
+
+// /* Make sure to specify the version statically, because the
+//    debugger may check the version before we can set it.  */
+// struct jit_descriptor __jit_debug_descriptor = { 1, 0, 0, 0 };
+
+
+// // Provide addresses in virtual table of object file.
+// // requires 
+// void* create_memory_obj_from_artifact(BarfObject* object) {
+
+// }
+
 
 typedef int (*EntryFN)(const char* path, const char* data, int size);
 
@@ -208,6 +248,11 @@ void dump_hex(void* address, int size, int stride) {
         log__printf("\n");
 }
 
+// Here so you can put breakpoint on it
+int call_entry(EntryFN entry, const char* path, const char* arg_data, int arg_data_len) {
+    return entry(path, arg_data, arg_data_len);
+}
+
 bool barf_load_file(const char* path, int argc, const char** argv) {
     BarfLoader* loader = NULL;
     BarfObject* object = NULL;
@@ -309,7 +354,7 @@ bool barf_load_file(const char* path, int argc, const char** argv) {
         }
     }
 
-    int result = entry(path, arg_data, arg_data_len);
+    int result = call_entry(entry, path, arg_data, arg_data_len);
     // log__printf("Exit code: %d", result);
 
     // alloc memory

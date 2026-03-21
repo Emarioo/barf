@@ -72,6 +72,10 @@ int ba_entry(const char* path, const char* data, int size) {
     }
 
     FSHandle file = fs__open("README.md", FS_READ);
+    if (file == FS_INVALID_HANDLE) {
+        log__printf("Cannot read README\n");
+        return 0;
+    }
 
     char text[24];
     text[23] = 0;
