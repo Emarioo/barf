@@ -162,6 +162,9 @@ void barf_dump(BarfObject* object) {
         if (section->flags & BARF_FLAG_IGNORE) {
             log("IGNORE ");
         }
+        if (section->flags & BARF_FLAG_METADATA) {
+            log("METADATA ");
+        }
         log("\n");
         log("   align:  %hu\n", section->alignment);
         log("   offset: "FL"u\n", section->data_offset);
@@ -329,7 +332,10 @@ bool barf_convert_from_coff(const char* path, const char* output) {
         strcpy(sec->name, name);
         sec->data_size = section->SizeOfRawData;
         sec->data_offset = section->PointerToRawData; // Temporarily set offset in COFF to section data, updated later
-        
+         
+        if (!strncmp(name, ".debug_", 7)) {
+            sec->flags |= BARF_FLAG_METADATA;
+        }
         if (section->Characteristics & IMAGE_SCN_MEM_EXECUTE) {
             sec->flags |= BARF_FLAG_EXEC;
         }
@@ -677,6 +683,8 @@ bool barf_convert_from_elf(const char* path, const char* output) {
             // skip empty sections
             continue;
         }
+        // @TODO It is not safe to skip INIT_ARRAY, FINI_ARRAY and other sections.
+        //   We should provide error saying can't safely convert to Binary Artifact.
         if (section->sh_type != SHT_NOTE
         && section->sh_type != SHT_NOBITS
         && section->sh_type != SHT_PROGBITS) {
@@ -692,8 +700,13 @@ bool barf_convert_from_elf(const char* path, const char* output) {
 
         sec->flags = 0;
         if (section->sh_type == SHT_NOTE || 0 == (section->sh_flags & SHF_ALLOC)) {
-            sec->flags = BARF_FLAG_IGNORE;
+            if (!strncmp(name, ".debug_", 7)) {
+                sec->flags = BARF_FLAG_METADATA;
+            } else {
+                sec->flags = BARF_FLAG_IGNORE;
+            }
         } else {
+            
             if (section->sh_type == SHT_NOBITS) {
                 sec->flags |= BARF_FLAG_ZEROED;
             }

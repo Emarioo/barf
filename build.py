@@ -7,7 +7,8 @@ ROOT = os.path.dirname(__file__)
 BARF_FILES = [
     f"{ROOT}/src/barf/main.c",
     f"{ROOT}/src/barf/format.c",
-    f"{ROOT}/src/barf/barf.c"
+    f"{ROOT}/src/barf/barf.c",
+    f"{ROOT}/src/barf/debug_jit.c",
 ]
 LIBC_FILES = [
     f"{ROOT}/src/libc/libc.c",
@@ -30,8 +31,8 @@ def compile():
 
     
     artifact = "barf.ba"
-    artifact_flags = f"-I{ROOT}/include -I{ROOT}/src {WARN_FLAGS} {NOLIB_FLAGS}"
-    compile_artifact(artifact, BARF_FILES + LIBC_FILES, artifact_flags)
+    artifact_flags = f"-I{ROOT}/include -I{ROOT}/src {WARN_FLAGS} {NOLIB_FLAGS} -g"
+    # compile_artifact(artifact, BARF_FILES + LIBC_FILES, artifact_flags)
 
     compile_artifact("wa.ba", ["examples/wa.c","examples/util.c"] + LIBC_FILES, artifact_flags)
     # compile_artifact("pro.ba", ["examples/wa.c","examples/util.c"], artifact_flags)
@@ -41,7 +42,8 @@ def compile():
     # os.system("barf -d pro.ba")
 
     # os.system("barf barf.ba -- wa.ba")
-    os.system("barf barf.ba -- -d wa.ba")
+    # os.system("barf barf.ba -- -d wa.ba")
+    os.system("barf wa.ba")
 
 
     # os.system(f"barf pro.ba")

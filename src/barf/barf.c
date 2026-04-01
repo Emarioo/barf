@@ -6,45 +6,8 @@
 
 #include "platform/platform.h"
 
-// https://sourceware.org/gdb/current/onlinedocs/gdb.html/Declarations.html#Declarations
-typedef enum
-{
-  JIT_NOACTION = 0,
-  JIT_REGISTER_FN,
-  JIT_UNREGISTER_FN
-} jit_actions_t;
+#include "barf/debug_jit.h"
 
-struct jit_code_entry
-{
-  struct jit_code_entry *next_entry;
-  struct jit_code_entry *prev_entry;
-  const char *symfile_addr;
-  uint64_t symfile_size;
-};
-
-struct jit_descriptor
-{
-  uint32_t version;
-  /* This type should be jit_actions_t, but we use uint32_t
-     to be explicit about the bitwidth.  */
-  uint32_t action_flag;
-  struct jit_code_entry *relevant_entry;
-  struct jit_code_entry *first_entry;
-};
-
-/* GDB puts a breakpoint in this function.  */
-// void __jit_debug_register_code() { }
-
-// /* Make sure to specify the version statically, because the
-//    debugger may check the version before we can set it.  */
-// struct jit_descriptor __jit_debug_descriptor = { 1, 0, 0, 0 };
-
-
-// // Provide addresses in virtual table of object file.
-// // requires 
-// void* create_memory_obj_from_artifact(BarfObject* object) {
-
-// }
 
 
 typedef int (*EntryFN)(const char* path, const char* data, int size);
@@ -294,11 +257,29 @@ bool barf_load_file(const char* path, int argc, const char** argv) {
             size_t read_bytes = fs__read(file, section->data_offset, segment->address, section->data_size);
             ASSERT(read_bytes == section->data_size);
         }
-        // log__printf("Section %s\n", section->name);
-        // dump_hex(segment->address, section->data_size, 16);
+        log__printf("Section %s\n", section->name);
+        dump_hex(segment->address, section->data_size, 16);
     }
 
     fs__close(file);
+
+    
+    {
+        // @IMPORTANT THIS MUST BE DONE BEFORE APPLYING RELOCATIONS TO SEGMENTS.
+        //   Segments must also be loaded into memory because GDB wants the ELF blob to
+        //   contain virtual addresses to loaded sections.
+        int blob_size;
+        void* blob = create_memory_obj_from_artifact(object, &blob_size);
+
+        FSHandle handle = fs__open("blob.elf", FS_WRITE);
+        fs__write(handle, 0, blob, blob_size);
+        fs__close(handle);
+        
+        log__printf("Wrote blob.elf\n");
+        return false;
+
+        register_jit_debug(blob, blob_size);
+    }
 
     // Apply relocations
     bool res = barf_apply_relocations(loader);
@@ -310,6 +291,8 @@ bool barf_load_file(const char* path, int argc, const char** argv) {
     if (!res) {
         goto cleanup;
     }
+
+
     // for (int i=0; i< object->header.section_count;i++) {
     //     BarfSection* section = &object->sections[i];
     //     BarfSegment* segment = &object->segments[i];

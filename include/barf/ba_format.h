@@ -39,10 +39,11 @@ typedef struct BarfHeader {
 
 typedef enum BarfSectionFlag {
     // BARF_FLAG_READ   = 0x1, // all sections are readable
-    BARF_FLAG_WRITE  = 0x2,
-    BARF_FLAG_EXEC   = 0x4,
-    BARF_FLAG_ZEROED = 0x8,
-    BARF_FLAG_IGNORE = 0x10,
+    BARF_FLAG_WRITE    = 0x2,
+    BARF_FLAG_EXEC     = 0x4,
+    BARF_FLAG_ZEROED   = 0x8,
+    BARF_FLAG_IGNORE   = 0x10, // extra info that is useless at runtime, .note section may provide info about compiler and flag used for example.
+    BARF_FLAG_METADATA = 0x20, // Debug info is considered metadata and can be stripped but has importance and shouldn't be stripped normally.
 } BarfSectionFlag;
 typedef u16 BarfSectionFlags;
 
