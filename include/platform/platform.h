@@ -55,7 +55,11 @@ void fs__close(FSHandle handle);
 void fs__info(FSHandle handle, FSInfo* info);
 
 uint64_t fs__read(FSHandle handle, uint64_t offset, void* buffer, uint64_t size);
-uint64_t fs__write(FSHandle handle, uint64_t offset, void* buffer, uint64_t size);
+uint64_t fs__write(FSHandle handle, uint64_t offset, const void* buffer, uint64_t size);
+
+void fs__abspath(const char* path, int out_path_cap, char* out_path);
+void fs__exepath(int out_path_cap, char* out_path);
+bool fs__exists(const char* path);
 
 // @TODO Iterate directory, recursively
 
@@ -66,10 +70,10 @@ uint64_t fs__write(FSHandle handle, uint64_t offset, void* buffer, uint64_t size
 // allocate:    ptr = mem_alloc(4096, NULL)
 // reallocate:  ptr = mem_alloc(4096, ptr)
 // free:        mem_alloc(0, ptr)
-void* mem__alloc(uint64_t size, void* old_ptr);
-#define mem__malloc(SIZE) mem__alloc(SIZE, NULL)
-#define mem__realloc(SIZE, PTR) mem__alloc(SIZE, PTR)
-#define mem__free(PTR) mem__alloc(0, PTR)
+void* mem__allocate(uint64_t size, void* old_ptr);
+#define mem__alloc(SIZE) mem__allocate(SIZE, NULL)
+#define mem__realloc(SIZE, PTR) mem__allocate(SIZE, PTR)
+#define mem__free(PTR) mem__allocate(0, PTR)
 
 #define MEM_READ  0x1
 #define MEM_WRITE 0x2
@@ -80,6 +84,15 @@ void  mem__mapflag(void* address, uint64_t size, int flags);
 void  mem__unmap(void* address, uint64_t size);
 
 
+// #define HEAP_ALLOC_OBJECT(T) (T*)_heap_alloc_object(sizeof(T));
+// static inline void* _heap_alloc_object(const int size) {
+//     void* ptr = mem__allocate(size, NULL);
+//     memset(ptr, 0, size);
+//     return ptr;
+// }
+
+#define HEAP_ALLOC_ARRAY(T,N) (T*)mem__allocate(sizeof(T) * (N), NULL)
+
 
 
 // ##########################
@@ -88,3 +101,71 @@ void  mem__unmap(void* address, uint64_t size);
 
 void log__printf(const char* format, ...);
 
+
+
+// #############################
+//       Threads
+// #############################
+
+
+// #include <stdatomic.h>
+
+typedef struct {
+    uint64_t handle;
+    uint64_t id; // id on windows is 32-bit, on linux id == handle
+} Thread;
+
+typedef struct {
+    uint64_t handle; // pthread_mutex_t* on Linux
+} Mutex;
+
+typedef struct {
+    uint64_t handle;
+} Semaphore;
+
+typedef  uint32_t(*ThreadRoutine)(void*);
+
+void thread__spawn(Thread* thread, ThreadRoutine func, void* arg);
+void thread__join(Thread* thread);
+bool thread__joinable(Thread* thread);
+uint64_t thread__current_id();
+void thread__sleep_ns(uint64_t ns);
+
+void thread__create_mutex(Mutex* mutex);
+void thread__lock_mutex(Mutex* mutex);
+void thread__unlock_mutex(Mutex* mutex);
+void thread__cleanup_mutex(Mutex* mutex);
+
+void thread__create_semaphore(Semaphore* semaphore, uint32_t initial, uint32_t max_locks);
+void thread__wait_semaphore(Semaphore* semaphore);
+bool thread__signal_semaphore(Semaphore* semaphore, int count);
+void thread__cleanup_semaphore(Semaphore* semaphore);
+
+// These atomics are GCC specific, not sure clang or MSVC has them
+// returns previous value
+#define atomic_add(PTR, VAL) __atomic_fetch_add(PTR, VAL, __ATOMIC_SEQ_CST)
+// returns previous value
+#define atomic_add64(PTR, VAL) __atomic_fetch_add(PTR, VAL, __ATOMIC_SEQ_CST)
+
+
+//##############################
+//      SYSTEM INFORMATION
+//##############################
+
+// logical cores (threads)
+int sys__cpu_count();
+
+
+//##############################
+//      TIME
+//##############################
+
+
+#define NANOSECOND_PER_SECOND (1000000000ULL)
+#define NS_TO_SEC(NS) ((NS)/NANOSECOND_PER_SECOND)
+
+// Arbitrary nanosecond counter used for interval measurements, usually has higher precision
+uint64_t time__now();
+
+// Nanoseconds since Jan 1, 1970
+uint64_t time__now_utc();

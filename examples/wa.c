@@ -27,9 +27,9 @@ int update(int value);
 
 void parse_input(const char* input, int size, int* argc, char*** argv) {
 
-    char** args = mem__alloc(8*50, NULL);
-    *argv = mem__alloc(8*50, NULL);
-    char* text = mem__alloc(50*50, NULL);
+    char** args = mem__alloc(8*50);
+    *argv = mem__alloc(8*50);
+    char* text = mem__alloc(50*50);
     int argi = 0;
     int text_len = 0;
 

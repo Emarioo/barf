@@ -118,7 +118,7 @@ void unregister_jit_debug(int entry_id) {
 
 void* create_memory_obj_from_artifact(BarfObject* object, int* out_obj_size) {
 
-    u8* data = mem__malloc(0x100000);
+    u8* data = mem__alloc(0x100000);
 
     int data_head = 0;
     
@@ -165,7 +165,7 @@ void* create_memory_obj_from_artifact(BarfObject* object, int* out_obj_size) {
     } SectionInfo;
 
     // @NOCHECKIN MEMORY LEAK
-    SectionInfo* section_infos = mem__malloc(sizeof(SectionInfo) * object->header.section_count);
+    SectionInfo* section_infos = mem__alloc(sizeof(SectionInfo) * object->header.section_count);
     memset(section_infos, 0, sizeof(SectionInfo) * object->header.section_count);
 
     #define BARF_TO_ELF_SECTION_INDEX(INDEX) section_infos[INDEX].elf_section_index;
@@ -221,7 +221,7 @@ void* create_memory_obj_from_artifact(BarfObject* object, int* out_obj_size) {
                     if (!info->sections_to_merge) {
                         int cap = sizeof(BarfSection*) * object->header.section_count;
                         info->sections_to_merge_cap = cap;
-                        info->sections_to_merge = mem__malloc(cap);
+                        info->sections_to_merge = mem__alloc(cap);
                         new_data_offset = object->sections[merge_sections[mi].index].data_size;
                     } else {
                         int prev_bindex = info->sections_to_merge[info->sections_to_merge_len] - object->sections;
@@ -321,7 +321,7 @@ void* create_memory_obj_from_artifact(BarfObject* object, int* out_obj_size) {
     } SymbolInfo;
 
 
-    SymbolInfo* symbol_infos = mem__malloc(sizeof(SymbolInfo) * object->header.symbol_count);
+    SymbolInfo* symbol_infos = mem__alloc(sizeof(SymbolInfo) * object->header.symbol_count);
     memset(symbol_infos, 0, sizeof(SymbolInfo) * object->header.symbol_count);
     int current_symbol_count = 0;
 

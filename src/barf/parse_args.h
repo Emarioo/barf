@@ -5,8 +5,8 @@
 
 static void parse_input(const char* input, int size, const char* path, int* argc, char*** argv) {
 
-    char** args = mem__alloc(8*50, NULL);
-    char* text = mem__alloc(50*50, NULL);
+    char** args = mem__allocate(8*50, NULL);
+    char* text = mem__allocate(50*50, NULL);
     int argi = 0;
     int text_len = 0;
 

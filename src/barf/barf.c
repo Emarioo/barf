@@ -105,8 +105,8 @@ void create_platform(BarfLoader* loader) {
     void* ptr = mem__map(NULL, size, MEM_READ|MEM_WRITE);
     loader->external_segment = ptr;
 
-    char** names = mem__alloc(8 * max_funcs, NULL);
-    char* text = mem__alloc(max_funcs * 50, NULL);
+    char** names = mem__alloc(8 * max_funcs);
+    char* text = mem__alloc(max_funcs * 50);
     int text_len = 0;
     
     loader->external_names = names;
@@ -124,7 +124,7 @@ void create_platform(BarfLoader* loader) {
         loader->external_names[loader->external_names_len++] = name;    \
     }
 
-    ADD(mem__alloc)
+    ADD(mem__allocate)
     ADD(mem__map)
     ADD(mem__mapflag)
     ADD(mem__unmap)
@@ -220,7 +220,7 @@ bool barf_load_file(const char* path, int argc, const char** argv) {
     BarfLoader* loader = NULL;
     BarfObject* object = NULL;
 
-    loader = mem__alloc(sizeof(*loader), NULL);
+    loader = mem__alloc(sizeof(*loader));
     if(!loader) {
         log__printf("barf: malloc failed\n");
         goto cleanup;
@@ -237,7 +237,7 @@ bool barf_load_file(const char* path, int argc, const char** argv) {
     loader->objects = object;
     loader->object_count = 1;
 
-    object->segments = mem__alloc(sizeof(*object->segments) * object->header.section_count, NULL);
+    object->segments = mem__alloc(sizeof(*object->segments) * object->header.section_count);
     memset(object->segments, 0, sizeof(*object->segments) * object->header.section_count);
 
     FSHandle file = fs__open(path, FS_READ);
@@ -325,7 +325,7 @@ bool barf_load_file(const char* path, int argc, const char** argv) {
     int arg_data_len = 0;
     if (argc > 0) {
         int arg_data_cap = argc * 50;
-        arg_data = mem__alloc(arg_data_cap, NULL);
+        arg_data = mem__alloc(arg_data_cap);
         for (int i = 0; i < argc;i++) {
             int len = strlen(argv[i]);
             if (arg_data_len != 0) {

@@ -14,8 +14,8 @@
 #define file_read(FILE, HEAD_PTR, PTR, SIZE) fs__read(FILE, ((*(HEAD_PTR) += (SIZE)), *(HEAD_PTR) - (SIZE)), PTR, SIZE)
 #define file_write(FILE, HEAD_PTR, PTR, SIZE) fs__write(FILE, ((*(HEAD_PTR) += (SIZE)), *(HEAD_PTR) - (SIZE)), PTR, SIZE)
 
-#define heap_alloc(SIZE) mem__alloc(SIZE, NULL)
-#define heap_free(PTR) mem__alloc(0, PTR)
+#define heap_alloc(SIZE) mem__allocate(SIZE, NULL)
+#define heap_free(PTR) mem__allocate(0, PTR)
 
 #define IS_INVALID_FS_HANDLE(F) ((F) == FS_INVALID_HANDLE)
 
@@ -34,7 +34,7 @@ BarfObject* barf_parse_header_from_file(const char* path) {
 
     size_t fs_head = 0;
 
-    object = mem__alloc(sizeof(*object), NULL);
+    object = heap_alloc(sizeof(*object));
     if (!object) {
         log_error("ERROR barf: heap_alloc failed, when parsing '%s'\n", path);
         goto cleanup;
@@ -64,7 +64,7 @@ BarfObject* barf_parse_header_from_file(const char* path) {
         goto cleanup;
     }
 
-    object->sections = mem__alloc(size_of_sections, NULL);
+    object->sections = heap_alloc(size_of_sections);
     if (!object->sections) {
         log_error("ERROR barf: heap_alloc failed, when parsing '%s'\n", path);
         goto cleanup;
@@ -75,17 +75,17 @@ BarfObject* barf_parse_header_from_file(const char* path) {
 
     
     u64 size_of_symbols = object->header.symbol_count * sizeof(*object->symbols);
-    object->symbols = mem__alloc(size_of_symbols, NULL);
+    object->symbols = heap_alloc(size_of_symbols);
     memset(object->symbols, 0, size_of_symbols);
     file_read(file, &fs_head, object->symbols, sizeof(*object->symbols) * object->header.symbol_count);
 
-    object->strings = mem__alloc(object->header.string_size, NULL);
+    object->strings = heap_alloc(object->header.string_size);
     memset(object->strings, 0, object->header.string_size);
     file_read(file, &fs_head, object->strings, object->header.string_size);
 
     u64 size_of_relocations_list = object->header.section_count * sizeof(*object->relocations);
     
-    object->relocations = mem__alloc(size_of_relocations_list, NULL);
+    object->relocations = heap_alloc(size_of_relocations_list);
     memset(object->relocations, 0, size_of_relocations_list);
 
     for (int i=0;i<object->header.section_count;i++) {
@@ -96,7 +96,7 @@ BarfObject* barf_parse_header_from_file(const char* path) {
         }
 
         u64 size_of_relocations = section->relocation_count * sizeof(**object->relocations);
-        BarfRelocation* relocations = mem__alloc(size_of_relocations, NULL);
+        BarfRelocation* relocations = heap_alloc(size_of_relocations);
         memset(relocations, 0, size_of_relocations);
 
         fs__read(file, section->relocation_offset, relocations, sizeof(**object->relocations) * section->relocation_count);
@@ -114,8 +114,8 @@ cleanup:
         fs__close(file);
     if (object) {
         if (object->sections)
-            mem__alloc(0, object->sections);
-        mem__alloc(0, object);
+            heap_free(object->sections);
+        heap_free(object);
     }
     return NULL;
 }
@@ -123,8 +123,8 @@ cleanup:
 
 
 void barf_free_object(BarfObject* object) {
-    mem__alloc(0, object->sections);
-    mem__alloc(0, object);
+    heap_free(object->sections);
+    heap_free(object);
 }
 
 
@@ -226,7 +226,7 @@ bool barf_convert_from_coff(const char* path, const char* output) {
     fs__info(file, &fileInfo);
     dataSize = fileInfo.file_size;
 
-    data = mem__alloc(COFF_File_Header_SIZE, NULL);
+    data = mem__allocate(COFF_File_Header_SIZE, NULL);
 
     uint64_t fs_head = 0;
 
@@ -250,7 +250,7 @@ bool barf_convert_from_coff(const char* path, const char* output) {
     }
 
     // Probably COFF, read rest of file at once (easiest)
-    data = mem__alloc(dataSize, data);
+    data = mem__allocate(dataSize, data);
     read_bytes = file_read(file, &fs_head, data + COFF_File_Header_SIZE, dataSize - COFF_File_Header_SIZE);
     if(read_bytes != dataSize - COFF_File_Header_SIZE) {
         log_error("barf: could not read all bytes '%s'\n", path);
@@ -262,7 +262,7 @@ bool barf_convert_from_coff(const char* path, const char* output) {
     
     header = (COFF_File_Header*) data; // set again after realloc
     
-    object = mem__alloc(sizeof(*object), NULL);
+    object = mem__allocate(sizeof(*object), NULL);
     memset(object, 0, sizeof(*object));
 
     object->header.magic = BARF_MAGIC;
@@ -277,12 +277,12 @@ bool barf_convert_from_coff(const char* path, const char* output) {
         default: strcpy(object->header.target, "unknown");
     }
 
-    object->sections = mem__alloc(header->NumberOfSections * sizeof(*object->sections), NULL);
+    object->sections = mem__allocate(header->NumberOfSections * sizeof(*object->sections), NULL);
     memset(object->sections, 0, header->NumberOfSections * sizeof(*object->sections));
 
     
     u64 size_of_relocations_list = header->NumberOfSections * sizeof(*object->relocations);
-    object->relocations = mem__alloc(size_of_relocations_list, NULL);
+    object->relocations = mem__allocate(size_of_relocations_list, NULL);
     memset(object->relocations, 0, size_of_relocations_list);
 
 
@@ -294,7 +294,7 @@ bool barf_convert_from_coff(const char* path, const char* output) {
         int section_index;
     } SectionInfo;
 
-    SectionInfo* section_infos = mem__alloc(sizeof(SectionInfo) * header->NumberOfSections, NULL);
+    SectionInfo* section_infos = mem__allocate(sizeof(SectionInfo) * header->NumberOfSections, NULL);
     memset(section_infos, 0, sizeof(SectionInfo) * header->NumberOfSections);
 
     for (int i = 0; i < header->NumberOfSections; i++) {
@@ -352,10 +352,10 @@ bool barf_convert_from_coff(const char* path, const char* output) {
         sec->alignment = 1 << (((section->Characteristics >> 20) & 0xF) - 1);
     }
 
-    object->strings = mem__alloc(size_of_strings, NULL);
+    object->strings = mem__allocate(size_of_strings, NULL);
     memset(object->strings, 0, size_of_strings);
 
-    object->symbols = mem__alloc(header->NumberOfSymbols * sizeof(*object->symbols), NULL);
+    object->symbols = mem__allocate(header->NumberOfSymbols * sizeof(*object->symbols), NULL);
     memset(object->symbols, 0, header->NumberOfSymbols * sizeof(*object->symbols));
 
     // Need a way to map Coff symbol numbers to barf symbol indexes, since aux symbols aren't carried over and number indexes don't map 1:1
@@ -363,7 +363,7 @@ bool barf_convert_from_coff(const char* path, const char* output) {
     typedef struct {
         u32 symbol_index;
     } SymbolInfo;
-    SymbolInfo* symbol_infos = mem__alloc(sizeof(SymbolInfo) * header->NumberOfSymbols, NULL);
+    SymbolInfo* symbol_infos = mem__allocate(sizeof(SymbolInfo) * header->NumberOfSymbols, NULL);
     memset(symbol_infos, 0, sizeof(SymbolInfo) * header->NumberOfSymbols);
 
     u64 next_string_offset = 0;
@@ -437,7 +437,7 @@ bool barf_convert_from_coff(const char* path, const char* output) {
         if (!section->NumberOfRelocations) {
             continue;
         }
-        BarfRelocation* relocations = mem__alloc(section->NumberOfRelocations * sizeof(BarfRelocation), NULL);
+        BarfRelocation* relocations = mem__allocate(section->NumberOfRelocations * sizeof(BarfRelocation), NULL);
         object->relocations[si] = relocations;
         memset(relocations, 0, section->NumberOfRelocations * sizeof(BarfRelocation));
 
@@ -513,16 +513,16 @@ bool barf_convert_from_coff(const char* path, const char* output) {
     
     file_write(file, &fs_head, object->strings, object->header.string_size);
     fs__close(file);
-    mem__alloc(0, object);
+    mem__allocate(0, object);
     return true;
 
 cleanup:
     if (!IS_INVALID_FS_HANDLE(file))
         fs__close(file);
     if (object)
-        mem__alloc(0, object);
+        mem__allocate(0, object);
     if (data)
-        mem__alloc(0, data);
+        mem__allocate(0, data);
     return false;
 }
 bool barf_convert_from_elf(const char* path, const char* output) {
@@ -543,7 +543,7 @@ bool barf_convert_from_elf(const char* path, const char* output) {
     fs__info(file, &fileInfo);
     dataSize = fileInfo.file_size;
 
-    data = mem__alloc(sizeof(Elf64_Ehdr), NULL);
+    data = mem__allocate(sizeof(Elf64_Ehdr), NULL);
 
     uint64_t fs_head = 0;
 
@@ -572,7 +572,7 @@ bool barf_convert_from_elf(const char* path, const char* output) {
         goto cleanup;
     }
 
-    data = mem__alloc(dataSize, data);
+    data = mem__allocate(dataSize, data);
     read_bytes = file_read(file, &fs_head, data + sizeof(Elf64_Ehdr), dataSize - sizeof(Elf64_Ehdr));
     if(read_bytes != dataSize - sizeof(Elf64_Ehdr)) {
         log_error("barf: could not read all bytes '%s'\n", path);
@@ -584,7 +584,7 @@ bool barf_convert_from_elf(const char* path, const char* output) {
     
     header = (Elf64_Ehdr*) data; // set again after realloc
     
-    object = mem__alloc(sizeof(*object), NULL);
+    object = mem__allocate(sizeof(*object), NULL);
     memset(object, 0, sizeof(*object));
 
     object->header.magic = BARF_MAGIC;
@@ -599,11 +599,11 @@ bool barf_convert_from_elf(const char* path, const char* output) {
         default: strcpy(object->header.target, "unknown");
     }
 
-    object->sections = mem__alloc(header->e_shnum * sizeof(*object->sections), NULL);
+    object->sections = mem__allocate(header->e_shnum * sizeof(*object->sections), NULL);
     memset(object->sections, 0, header->e_shnum * sizeof(*object->sections));
 
     u64 size_of_relocations_list = header->e_shnum * sizeof(*object->relocations);
-    object->relocations = mem__alloc(size_of_relocations_list, NULL);
+    object->relocations = mem__allocate(size_of_relocations_list, NULL);
     memset(object->relocations, 0, size_of_relocations_list);
 
     
@@ -613,7 +613,7 @@ bool barf_convert_from_elf(const char* path, const char* output) {
         int rel_index;
     } SectionInfo;
 
-    SectionInfo* section_infos = mem__alloc(sizeof(SectionInfo) * header->e_shnum, NULL);
+    SectionInfo* section_infos = mem__allocate(sizeof(SectionInfo) * header->e_shnum, NULL);
     memset(section_infos, 0, sizeof(SectionInfo) * header->e_shnum);
 
 
@@ -724,10 +724,10 @@ bool barf_convert_from_elf(const char* path, const char* output) {
 
     int symbol_count = elf_sections[elf_symbol_table_index].sh_size / sizeof(Elf64_Sym);
     
-    object->strings = mem__alloc(estimated_string_table_size, NULL);
+    object->strings = mem__allocate(estimated_string_table_size, NULL);
     memset(object->strings, 0, estimated_string_table_size);
 
-    object->symbols = mem__alloc(symbol_count * sizeof(*object->symbols), NULL);
+    object->symbols = mem__allocate(symbol_count * sizeof(*object->symbols), NULL);
     memset(object->symbols, 0, symbol_count * sizeof(*object->symbols));
 
     
@@ -736,7 +736,7 @@ bool barf_convert_from_elf(const char* path, const char* output) {
     typedef struct {
         u32 symbol_index;
     } SymbolInfo;
-    SymbolInfo* symbol_infos = mem__alloc(sizeof(SymbolInfo) * symbol_count, NULL);
+    SymbolInfo* symbol_infos = mem__allocate(sizeof(SymbolInfo) * symbol_count, NULL);
     memset(symbol_infos, 0, sizeof(SymbolInfo) * symbol_count);
 
     Elf64_Sym* elf_symbols = (Elf64_Sym*)(data + elf_symbol_table->sh_offset);
@@ -806,7 +806,7 @@ bool barf_convert_from_elf(const char* path, const char* output) {
         int relocation_count = (rel_section ? rel_section->sh_size / rel_section->sh_entsize : 0) + (rela_section ? rela_section->sh_size / rela_section->sh_entsize : 0);
 
 
-        BarfRelocation* relocations = mem__alloc(relocation_count * sizeof(BarfRelocation), NULL);
+        BarfRelocation* relocations = mem__allocate(relocation_count * sizeof(BarfRelocation), NULL);
         object->relocations[section_info->section_index] = relocations;
         memset(relocations, 0, relocation_count * sizeof(BarfRelocation));
         // sec->relocation_offset = section->PointerToRelocations;
@@ -927,16 +927,16 @@ bool barf_convert_from_elf(const char* path, const char* output) {
     
     file_write(file, &fs_head, object->strings, object->header.string_size);
     fs__close(file);
-    mem__alloc(0, object);
+    mem__allocate(0, object);
     return true;
 
 cleanup:
     if (!IS_INVALID_FS_HANDLE(file))
         fs__close(file);
     if (object)
-        mem__alloc(0, object);
+        mem__allocate(0, object);
     if (data)
-        mem__alloc(0, data);
+        mem__allocate(0, data);
     return false;
 }
 
@@ -978,8 +978,8 @@ bool barf_combine_to_artifact(int input_count, const char** input_files, const c
 
     int    ba_path_text_cap = 0x10000;
     int    ba_path_text_len = 0;
-    ba_path_text = mem__alloc(ba_path_text_cap, NULL);
-    ba_paths     = mem__alloc(sizeof(char*) * input_count, NULL);
+    ba_path_text = mem__allocate(ba_path_text_cap, NULL);
+    ba_paths     = mem__allocate(sizeof(char*) * input_count, NULL);
 
     for (int i=0;i<input_count;i++) {
         const char* input = input_files[i];
@@ -1005,7 +1005,7 @@ bool barf_combine_to_artifact(int input_count, const char** input_files, const c
             ba_paths[i] = input;
     }
 
-    objects = mem__alloc(sizeof(BarfObject*) * input_count, NULL);
+    objects = mem__allocate(sizeof(BarfObject*) * input_count, NULL);
 
     int estimated_symbol_count = 0;
     int estimated_section_count = 0;
@@ -1029,20 +1029,20 @@ bool barf_combine_to_artifact(int input_count, const char** input_files, const c
         estimated_string_size   += objects[i]->header.string_size;
     }
 
-    merged = mem__alloc(sizeof(BarfObject), NULL);
+    merged = mem__allocate(sizeof(BarfObject), NULL);
     memset(merged, 0, sizeof(*merged));
     merged->header.magic = BARF_MAGIC;
     merged->header.version = 1;
     memcpy(merged->header.target, objects[0]->header.target, sizeof(merged->header.target));
     
-    merged->sections = mem__alloc(sizeof(BarfSection) * estimated_section_count, NULL);
+    merged->sections = mem__allocate(sizeof(BarfSection) * estimated_section_count, NULL);
     memset(merged->sections, 0, sizeof(BarfSection) * estimated_section_count);
     // merged->header.section_count = estimated_section_count;
    
-    merged->relocations = mem__alloc(sizeof(BarfRelocation*) * estimated_section_count, NULL);
+    merged->relocations = mem__allocate(sizeof(BarfRelocation*) * estimated_section_count, NULL);
     memset(merged->relocations, 0, sizeof(BarfRelocation*) * estimated_section_count);
 
-    merged->strings = mem__alloc(estimated_string_size, NULL);
+    merged->strings = mem__allocate(estimated_string_size, NULL);
 
     // @TODO We have tons of memory leaks here. Fix 'em up
 

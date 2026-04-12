@@ -23,7 +23,7 @@ int ba_main(int argc, char** argv) {
 
     int user_arg_index = -1;
 
-    const char** input_files = mem__alloc(50 * sizeof(char*), NULL);
+    const char** input_files = mem__alloc(50 * sizeof(char*));
     int input_files_len = 0;
 
     int argi = 1;
