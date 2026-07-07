@@ -19,7 +19,8 @@ WARN_FLAGS = "-Wall -Wno-unused-variable -Wno-unused-value"
 NOLIB_FLAGS = "-fno-builtin -static -fPIC -fpie -nostdlib -ffreestanding -nostartfiles -mavx2"
 
 def main():
-    compile()
+    # compile()
+    compile_sched()
 
 def compile():
     RELEASES = f"{ROOT}/releases"
@@ -83,6 +84,43 @@ def compile_artifact(output_file, files, flags):
         cmd(f"gcc -c {flags} {src} -o {obj}")
     
     cmd(f"barf -c -o {output_file} {' '.join(OBJECTS)}")
+
+
+def compile_sched():
+    
+    RELEASES = f"{ROOT}/releases"
+    VERSION = f"0.0.1-dev"
+    TARGET = f"{platform.system().lower()}-x86_64"
+    PACKAGE = f"{RELEASES}/sched-{VERSION}-{TARGET}"
+
+    output_path = PACKAGE
+
+    SCHED_FILES = [
+        f"{ROOT}/src/sched/sched.c",
+    ]
+    exe_name = "sched"
+    
+    INT = f"{ROOT}/int"
+    os.makedirs(INT, exist_ok=True)
+    os.makedirs(output_path, exist_ok=True)
+
+    COMMON_FLAGS = f"-g -I{ROOT}/include -I{ROOT}/src"
+    EXE = f"{output_path}/{exe_name}{'.exe' if platform.system()=="Windows" else ''}"
+
+    OBJECTS = [ INT + "/" + os.path.basename(f).replace('.c', '.o') for f in SCHED_FILES ]
+
+    if platform.system() == "Windows":
+        COMMON_FLAGS += " -DOS_WINDOWS"
+    if platform.system() == "Linux":
+        COMMON_FLAGS += " -DOS_LINUX"
+
+    for obj, src in zip(OBJECTS, SCHED_FILES):
+        cmd(f"gcc -c {COMMON_FLAGS} {WARN_FLAGS} {src} -o {obj}")
+
+    cmd(f"gcc {COMMON_FLAGS} {WARN_FLAGS} -o {EXE} {ROOT}/src/platform/platform.c {' '.join(OBJECTS)}")
+
+    cmd(f"sched")
+
 
 def cmd(c: str, silent: bool = False):
     c = c.replace("\\", "/")
